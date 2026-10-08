@@ -1,0 +1,14 @@
+.pio
+.vscode
+.DS_Store
+*.elf
+*.bin
+*.map
+MeshCore/
+android/.gradle/
+android/.idea/
+android/local.properties
+android/app/build/
+android/build/
+*.apk
+*.aab

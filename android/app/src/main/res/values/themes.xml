@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.H4Motion" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="android:statusBarColor">#06110C</item>
+        <item name="android:navigationBarColor">#06110C</item>
+        <item name="android:windowBackground">#06110C</item>
+        <item name="colorPrimary">#1F6B3A</item>
+        <item name="colorOnPrimary">#E8FFE8</item>
+    </style>
+</resources>
