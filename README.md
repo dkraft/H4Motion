@@ -78,7 +78,7 @@ Advert position is `0,0` until you set `lat` and `lon`. Admin password starts as
 PlatformIO is required. `make setup` clones [meshcore-dev/MeshCore](https://github.com/meshcore-dev/MeshCore) at commit `0679dbeffc504d562d2f09eb072fdc223f8ffc2a` and symlinks `extra/platformio.local.ini`.
 
 ```bash
-make test            # host checks for the radar frame and the channel lines
+make test            # host checks: radar frame, occupancy, channel lines
 make build           # env heltec_v4_motion
 make upload
 make monitor         # 115200
@@ -86,7 +86,7 @@ make monitor         # 115200
 
 Heltec V4 DFU if the port is missing: hold **USR**, tap **RST**, release **USR**.
 
-Serial and mesh admin CLI (Discover Sensors, log in, then the command):
+The USB console accepts a command ended by Enter or Return. Serial and mesh admin CLI (Discover Sensors, log in, then the command):
 
 | Command | Action |
 | --- | --- |
@@ -102,15 +102,15 @@ The user button queues `rd report`. The OLED shows the count, the last alert, ra
 
 `android/` is the radar display. Open that directory in Android Studio (JDK 17) and run it on a phone.
 
-1. Pair or just be near the MeshCore **companion** radio. This app is not the sensor.
-2. Allow Bluetooth and notifications.
-3. Tap **Scan**. The app finds the companion Nordic UART service, joins `#senseMB` if a channel slot is free, and draws tracks.
+1. Allow Bluetooth and notifications, then tap **Scan**. The service does not start until those are granted.
+2. When Android asks, enter the companion's BLE PIN. The companion UART requires an encrypted bond. Being nearby is not enough, and this app is not the sensor.
+3. The app finds the companion Nordic UART service, joins `#senseMB` if a channel slot is free, and draws tracks.
 4. **ENTER** and **NEAR** post a high-priority notification. The service stays in the foreground so that still happens with the screen covered.
 5. **Demo** walks a fake target down the scope without a radio. **4 m / 8 m / 16 m** changes the ring scale.
 
 The scope is the same frame as the firmware: center is the sensor, up is +Y, right is +X. Closing targets are amber. Inside 2.5 m they are red.
 
-This tree was built and the host wire checks were run. The APK was not compiled here (no Android SDK / JDK 17 on the build machine).
+`make test` checks the RD-03D frame and the occupancy machine on the host. `make build` produces the Heltec image. The debug APK is `android/app/build/outputs/apk/debug/app-debug.apk` after `assembleDebug` (JDK 17, compile SDK 34). The board was not flashed from here, and the app was not run on a phone, so the radar UART, the LoRa flood, and companion pairing are not confirmed on hardware.
 
 ## Layout
 

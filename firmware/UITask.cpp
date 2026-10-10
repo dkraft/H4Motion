@@ -18,6 +18,9 @@ void UITask::begin(NodePrefs* node_prefs, const char* build_date, const char* fi
   _prevBtnState = HIGH;
   _press_latched = false;
   _node_prefs = node_prefs;
+#ifdef PIN_USER_BTN
+  pinMode(PIN_USER_BTN, INPUT_PULLUP);
+#endif
   _display->turnOn();
 }
 

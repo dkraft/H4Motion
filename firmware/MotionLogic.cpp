@@ -31,9 +31,8 @@ void MotionLogic::begin(uint32_t now_ms) {
   _last_tx_ms = now_ms;
   _banner_until = 0;
   _force = false;
-  _pending_alert = false;
   _have_hold = false;
-  _pending[0] = 0;
+  _aq_n = 0;
 }
 
 void MotionLogic::setNearMm(int mm) {
@@ -72,7 +71,9 @@ void MotionLogic::recomputeClosest() {
     uint32_t d2 = (uint32_t)(x * x + y * y);
     if (d2 < best) {
       best = d2;
-      _snap.closest_mm = (int16_t)(sqrtf((float)d2) + 0.5f);
+      float dist = sqrtf((float)d2);
+      if (dist > 32767.0f) dist = 32767.0f;
+      _snap.closest_mm = (int16_t)(dist + 0.5f);
       float az = atan2f((float)x, (float)y) * (180.0f / 3.14159265f);
       if (az >= 0) _snap.closest_az = (int16_t)(az + 0.5f);
       else _snap.closest_az = (int16_t)(az - 0.5f);
@@ -107,10 +108,14 @@ void MotionLogic::queueAlert(const char* kind, uint32_t now_ms) {
   if (mm < 0) mm = 0;
   int tenths = (mm + 50) / 100;
   if (tenths < 0) tenths = 0;
-  snprintf(_pending, sizeof(_pending),
+  if (_aq_n >= kAlertQ) {
+    memmove(_aq[0], _aq[1], sizeof(_aq[0]) * (kAlertQ - 1));
+    _aq_n = kAlertQ - 1;
+  }
+  snprintf(_aq[_aq_n], sizeof(_aq[0]),
            "AL %s d=%d.%d az=%d x=%d y=%d s=%d",
            kind, tenths / 10, tenths % 10, az, x, y, s);
-  _pending_alert = true;
+  _aq_n++;
   strncpy(_snap.banner, kind, sizeof(_snap.banner) - 1);
   _snap.banner[sizeof(_snap.banner) - 1] = 0;
   _banner_until = now_ms + kBannerMs;
@@ -164,7 +169,7 @@ void MotionLogic::considerEdges(uint32_t now_ms) {
     _near_latched = false;
   }
 
-  if (_banner_until && (int32_t)(now_ms - _banner_until) >= 0) {
+  if (_banner_until && (int32_t)(now_ms - _banner_until) >= 0 && _aq_n == 0) {
     _snap.banner[0] = 0;
     _banner_until = 0;
   }
@@ -173,6 +178,10 @@ void MotionLogic::considerEdges(uint32_t now_ms) {
 }
 
 void MotionLogic::observe(const RdTarget t[RD03_MAX_TARGETS], uint32_t now_ms) {
+  // A lone frame must not pair with another frame after the zone has gone quiet.
+  if (!_occupied && _raw_hits > 0 && (uint32_t)(now_ms - _last_raw_ms) > kLeaveMs) {
+    _raw_hits = 0;
+  }
   memcpy(_snap.tgt, t, sizeof(_snap.tgt));
   recomputeClosest();
   considerEdges(now_ms);
@@ -190,7 +199,7 @@ void MotionLogic::tick(uint32_t now_ms) {
     queueAlert("LEAVE", now_ms);
     _snap.st = ST_CLEAR;
   }
-  if (_banner_until && (int32_t)(now_ms - _banner_until) >= 0 && !_pending_alert) {
+  if (_banner_until && (int32_t)(now_ms - _banner_until) >= 0 && _aq_n == 0) {
     _snap.banner[0] = 0;
     _banner_until = 0;
   }
@@ -198,16 +207,16 @@ void MotionLogic::tick(uint32_t now_ms) {
 
 bool MotionLogic::takeMessage(uint32_t now_ms, char* out, size_t out_len, bool* is_alert) {
   tick(now_ms);
-  if (_banner_until && (int32_t)(now_ms - _banner_until) >= 0 && !_pending_alert) {
+  if (_banner_until && (int32_t)(now_ms - _banner_until) >= 0 && _aq_n == 0) {
     _snap.banner[0] = 0;
     _banner_until = 0;
   }
   if ((uint32_t)(now_ms - _last_tx_ms) < kAirGapMs) return false;
 
-  if (_pending_alert) {
-    snprintf(out, out_len, "%s", _pending);
-    _pending_alert = false;
-    _pending[0] = 0;
+  if (_aq_n > 0) {
+    snprintf(out, out_len, "%s", _aq[0]);
+    memmove(_aq[0], _aq[1], sizeof(_aq[0]) * (_aq_n - 1));
+    _aq_n--;
     _last_tx_ms = now_ms;
     _last_track_ms = now_ms;
     if (is_alert) *is_alert = true;

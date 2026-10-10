@@ -13,7 +13,10 @@ import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanFilter
 import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -26,8 +29,10 @@ import java.util.UUID
  * Minimal MeshCore companion client. It joins hashtag channel #senseMB
  * (secret = first 16 bytes of SHA-256("#senseMB")) and forwards channel text.
  *
+ * The companion UART characteristics require an encrypted, authenticated bond.
  * Frames follow MeshCore docs/companion_protocol.md. One command is in flight
  * at a time. Push code 0x83 means the offline queue has something to read.
+ * SET_CHANNEL is 50 bytes, so the ATT payload (MTU - 3) must be at least that.
  */
 class MeshCompanion(
     context: Context,
@@ -48,14 +53,22 @@ class MeshCompanion(
     private var tx: BluetoothGattCharacteristic? = null
     private var wantLink = false
     private var servicesRequested = false
+    private var mtuStarted = false
+    private var protocolStarted = false
+    private var mtuGatePosted = false
+    @Volatile private var mtu = 23
     private var senseIdx = -1
     private var maxChannels = 8
     private var syncLeft = 0
+    private var bondRegistered = false
+    private var flightId = 0
+    private var pullAfter = false
 
     private data class Cmd(
         val bytes: ByteArray,
         val expect: Set<Int>,
-        val onResp: (ByteArray) -> Unit
+        val onResp: (ByteArray) -> Unit,
+        val tries: Int = 0
     )
 
     private val queue = ArrayDeque<Cmd>()
@@ -69,6 +82,7 @@ class MeshCompanion(
             return
         }
         wantLink = true
+        ensureBondReceiver()
         stopScan()
         closeGatt()
         listener.onStatus("scanning for a MeshCore companion")
@@ -92,6 +106,13 @@ class MeshCompanion(
         wantLink = false
         stopScan()
         closeGatt()
+        if (bondRegistered) {
+            try {
+                appContext.unregisterReceiver(bondReceiver)
+            } catch (_: IllegalArgumentException) {
+            }
+            bondRegistered = false
+        }
         listener.onStatus("disconnected")
     }
 
@@ -100,6 +121,40 @@ class MeshCompanion(
         try {
             adapter?.bluetoothLeScanner?.stopScan(scanCallback)
         } catch (_: SecurityException) {
+        }
+    }
+
+    @SuppressLint("UnspecifiedRegisterReceiverFlag")
+    private fun ensureBondReceiver() {
+        if (bondRegistered) return
+        val filter = IntentFilter(BluetoothDevice.ACTION_BOND_STATE_CHANGED)
+        if (Build.VERSION.SDK_INT >= 33) {
+            appContext.registerReceiver(bondReceiver, filter, Context.RECEIVER_EXPORTED)
+        } else {
+            appContext.registerReceiver(bondReceiver, filter)
+        }
+        bondRegistered = true
+    }
+
+    private val bondReceiver = object : BroadcastReceiver() {
+        @SuppressLint("MissingPermission")
+        override fun onReceive(context: Context, intent: Intent) {
+            if (intent.action != BluetoothDevice.ACTION_BOND_STATE_CHANGED) return
+            val device = bondedDevice(intent) ?: return
+            val open = gatt ?: return
+            if (device.address != open.device.address) return
+            val state = intent.getIntExtra(BluetoothDevice.EXTRA_BOND_STATE, BluetoothDevice.ERROR)
+            val prev = intent.getIntExtra(BluetoothDevice.EXTRA_PREVIOUS_BOND_STATE, BluetoothDevice.ERROR)
+            if (state == BluetoothDevice.BOND_BONDED) {
+                beginMtu(open)
+            } else if (state == BluetoothDevice.BOND_NONE && prev == BluetoothDevice.BOND_BONDING) {
+                listener.onStatus("pairing failed")
+                wantLink = false
+                try {
+                    open.disconnect()
+                } catch (_: SecurityException) {
+                }
+            }
         }
     }
 
@@ -126,34 +181,21 @@ class MeshCompanion(
     }
 
     private val gattCallback = object : BluetoothGattCallback() {
-        @SuppressLint("MissingPermission")
         override fun onConnectionStateChange(g: BluetoothGatt, status: Int, newState: Int) {
-            if (newState == BluetoothProfile.STATE_CONNECTED) {
-                servicesRequested = false
-                listener.onStatus("connected, negotiating MTU")
-                g.requestMtu(247)
-                main.postDelayed({
-                    if (wantLink && !servicesRequested && gatt != null) {
-                        servicesRequested = true
-                        g.discoverServices()
-                    }
-                }, 1500)
-            } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
-                closeGatt()
-                if (wantLink) {
-                    listener.onStatus("link lost, scanning again")
-                    main.postDelayed({ if (wantLink) scan() }, 2000)
-                } else {
-                    listener.onStatus("disconnected")
-                }
-            }
+            main.post { handleConnection(g, newState) }
         }
 
         @SuppressLint("MissingPermission")
         override fun onMtuChanged(g: BluetoothGatt, mtu: Int, status: Int) {
+            if (status == BluetoothGatt.GATT_SUCCESS && mtu > 0) {
+                this@MeshCompanion.mtu = mtu
+            }
             if (!servicesRequested) {
                 servicesRequested = true
-                g.discoverServices()
+                try {
+                    g.discoverServices()
+                } catch (_: SecurityException) {
+                }
             }
         }
 
@@ -184,10 +226,7 @@ class MeshCompanion(
         }
 
         override fun onDescriptorWrite(g: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {
-            queue.clear()
-            inflight = null
-            senseIdx = -1
-            send(appStart(), setOf(SELF_INFO)) { startQuery() }
+            maybeStartProtocol(g)
         }
 
         override fun onCharacteristicChanged(g: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
@@ -204,9 +243,126 @@ class MeshCompanion(
         }
     }
 
+    @SuppressLint("MissingPermission")
+    private fun handleConnection(g: BluetoothGatt, newState: Int) {
+        if (newState == BluetoothProfile.STATE_CONNECTED) {
+            servicesRequested = false
+            mtuStarted = false
+            protocolStarted = false
+            mtu = 23
+            main.postDelayed({
+                val open = gatt
+                if (!wantLink || open == null || open !== g) return@postDelayed
+                when (open.device.bondState) {
+                    BluetoothDevice.BOND_BONDED -> beginMtu(open)
+                    BluetoothDevice.BOND_BONDING -> listener.onStatus("pairing — enter the companion PIN")
+                    else -> {
+                        listener.onStatus("pairing — enter the companion PIN")
+                        try {
+                            if (!open.device.createBond()) listener.onStatus("pairing failed")
+                        } catch (ex: SecurityException) {
+                            listener.onStatus("Bluetooth permission missing")
+                            wantLink = false
+                            open.disconnect()
+                        }
+                    }
+                }
+            }, 300)
+        } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+            closeGatt()
+            if (wantLink) {
+                listener.onStatus("link lost, scanning again")
+                main.postDelayed({ if (wantLink) scan() }, 2000)
+            } else {
+                listener.onStatus("disconnected")
+            }
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun beginMtu(g: BluetoothGatt) {
+        if (mtuStarted || gatt !== g) return
+        mtuStarted = true
+        servicesRequested = false
+        listener.onStatus("paired, negotiating MTU")
+        try {
+            g.requestMtu(247)
+        } catch (ex: SecurityException) {
+            listener.onStatus("Bluetooth permission missing")
+            return
+        }
+        main.postDelayed({
+            if (wantLink && !servicesRequested && gatt === g) {
+                servicesRequested = true
+                try {
+                    g.discoverServices()
+                } catch (_: SecurityException) {
+                }
+            }
+        }, 1500)
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun maybeStartProtocol(g: BluetoothGatt) {
+        if (gatt !== g) return
+        var startNow = false
+        var postWait = false
+        synchronized(linkLock) {
+            if (!protocolStarted) {
+                if (mtu >= MIN_MTU) {
+                    protocolStarted = true
+                    startNow = true
+                } else if (!mtuGatePosted) {
+                    mtuGatePosted = true
+                    postWait = true
+                }
+            }
+        }
+        if (startNow) startSession()
+        if (!postWait) return
+        main.postDelayed({
+            if (!wantLink || gatt !== g) {
+                synchronized(linkLock) { mtuGatePosted = false }
+                return@postDelayed
+            }
+            var ready = false
+            var giveUp = false
+            synchronized(linkLock) {
+                mtuGatePosted = false
+                if (!protocolStarted && mtu >= MIN_MTU) {
+                    protocolStarted = true
+                    ready = true
+                } else if (!protocolStarted) {
+                    giveUp = true
+                }
+            }
+            if (ready) {
+                startSession()
+            } else if (giveUp) {
+                listener.onStatus("BLE MTU $mtu is too small")
+                wantLink = false
+                try {
+                    g.disconnect()
+                } catch (_: SecurityException) {
+                }
+            }
+        }, 600)
+    }
+
+    private fun startSession() {
+        synchronized(linkLock) {
+            queue.clear()
+            inflight = null
+            flightId++
+            pullAfter = false
+        }
+        senseIdx = -1
+        send(appStart(), setOf(SELF_INFO)) { startQuery() }
+    }
+
     private fun startQuery() {
-        send(byteArrayOf(DEVICE_QUERY, 3), setOf(DEVICE_INFO, ERR)) { frame ->
-            if (frame.size >= 4 && frame[0] == DEVICE_INFO) {
+        send(byteArrayOf(DEVICE_QUERY.toByte(), 3), setOf(DEVICE_INFO, ERR)) { frame ->
+            if (frame.size >= 4 && (frame[0].toInt() and 0xFF) == DEVICE_INFO) {
                 val fw = frame[1].toInt() and 0xFF
                 if (fw >= 3) maxChannels = (frame[3].toInt() and 0xFF).coerceIn(1, 8)
                 if (frame.size >= 8) {
@@ -219,7 +375,7 @@ class MeshCompanion(
             }
             val now = (System.currentTimeMillis() / 1000L).toInt()
             val setTime = byteArrayOf(
-                SET_TIME,
+                SET_TIME.toByte(),
                 (now and 0xFF).toByte(),
                 ((now shr 8) and 0xFF).toByte(),
                 ((now shr 16) and 0xFF).toByte(),
@@ -234,10 +390,10 @@ class MeshCompanion(
             finishChannels(found, empty)
             return
         }
-        send(byteArrayOf(GET_CHANNEL, index.toByte()), setOf(CHANNEL_INFO, ERR)) { frame ->
+        send(byteArrayOf(GET_CHANNEL.toByte(), index.toByte()), setOf(CHANNEL_INFO, ERR)) { frame ->
             var nextFound = found
             var nextEmpty = empty
-            if (frame.size >= 50 && frame[0] == CHANNEL_INFO) {
+            if (frame.size >= 50 && (frame[0].toInt() and 0xFF) == CHANNEL_INFO) {
                 val name = cString(frame, 2, 32)
                 val secret = frame.copyOfRange(34, 50)
                 if (name == CHANNEL_NAME) nextFound = index
@@ -261,12 +417,12 @@ class MeshCompanion(
             return
         }
         val frame = ByteArray(50)
-        frame[0] = SET_CHANNEL
+        frame[0] = SET_CHANNEL.toByte()
         frame[1] = empty.toByte()
         CHANNEL_NAME.toByteArray(Charsets.UTF_8).copyInto(frame, 2)
         hashtagSecret(CHANNEL_NAME).copyInto(frame, 34)
         send(frame, setOf(OK, ERR)) { resp ->
-            if (resp[0] == OK) {
+            if ((resp[0].toInt() and 0xFF) == OK) {
                 senseIdx = empty
                 listener.onStatus("#senseMB joined on slot $empty")
                 pullQueue()
@@ -286,7 +442,7 @@ class MeshCompanion(
             listener.onStatus("live on #senseMB")
             return
         }
-        send(byteArrayOf(SYNC_NEXT), setOf(CHANNEL_MSG, CHANNEL_MSG_V3, NO_MORE, ERR, 0x07, 0x10)) { frame ->
+        send(byteArrayOf(SYNC_NEXT.toByte()), setOf(CHANNEL_MSG, CHANNEL_MSG_V3, NO_MORE, ERR, 0x07, 0x10)) { frame ->
             val code = frame[0].toInt() and 0xFF
             if (code == NO_MORE || code == ERR) {
                 listener.onStatus("live on #senseMB")
@@ -300,44 +456,60 @@ class MeshCompanion(
     private fun onFrame(frame: ByteArray) {
         if (frame.isEmpty()) return
         val code = frame[0].toInt() and 0xFF
-        val waiting: Cmd?
-        val matched: Boolean
-        synchronized(linkLock) {
-            if (code == MSG_WAITING) {
-                if (inflight == null) {
-                    // Drop the lock before pullQueue, which enqueues.
-                }
-                waiting = null
-                matched = code == MSG_WAITING && inflight == null
-            } else {
-                val current = inflight
-                matched = current != null && (code in current.expect || code == OK || code == ERR)
-                if (matched) inflight = null
-                waiting = if (matched) current else null
-            }
-        }
         if (code == MSG_WAITING) {
-            if (matched) pullQueue()
+            val goNow = synchronized(linkLock) {
+                if (inflight == null) {
+                    true
+                } else {
+                    pullAfter = true
+                    false
+                }
+            }
+            if (goNow) pullQueue()
             return
+        }
+        val waiting: Cmd?
+        synchronized(linkLock) {
+            val current = inflight
+            val matched = current != null && (code in current.expect || code == OK || code == ERR)
+            if (matched) {
+                inflight = null
+                flightId++
+            }
+            waiting = if (matched) current else null
         }
         if (code == CHANNEL_MSG || code == CHANNEL_MSG_V3) {
             if (waiting != null) {
                 waiting.onResp(frame)
                 pump()
-            } else {
+            } else if (senseIdx >= 0) {
                 deliver(frame)
             }
+            maybePullAfter()
             return
         }
         if (waiting != null) {
             waiting.onResp(frame)
             pump()
         }
+        maybePullAfter()
+    }
+
+    private fun maybePullAfter() {
+        val go = synchronized(linkLock) {
+            if (pullAfter && inflight == null) {
+                pullAfter = false
+                true
+            } else {
+                false
+            }
+        }
+        if (go) pullQueue()
     }
 
     private fun deliver(frame: ByteArray) {
         val idx = channelIndex(frame)
-        if (senseIdx >= 0 && idx != senseIdx) return
+        if (senseIdx < 0 || idx != senseIdx) return
         val text = channelText(frame) ?: return
         if (text.isNotEmpty()) listener.onChannelText(text)
     }
@@ -354,6 +526,7 @@ class MeshCompanion(
         val cmd: Cmd
         val g: BluetoothGatt
         val characteristic: BluetoothGattCharacteristic
+        val id: Int
         synchronized(linkLock) {
             if (inflight != null) return
             val next = queue.poll() ?: return
@@ -364,10 +537,12 @@ class MeshCompanion(
                 return
             }
             inflight = next
+            id = ++flightId
             cmd = next
             g = open
             characteristic = writeChar
         }
+        armTimeout(id)
         val wrote = if (Build.VERSION.SDK_INT >= 33) {
             g.writeCharacteristic(characteristic, cmd.bytes, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)
         } else {
@@ -376,11 +551,40 @@ class MeshCompanion(
             if (g.writeCharacteristic(characteristic)) BluetoothGatt.GATT_SUCCESS else BluetoothGatt.GATT_FAILURE
         }
         if (wrote != BluetoothGatt.GATT_SUCCESS) {
-            synchronized(linkLock) {
-                if (inflight === cmd) inflight = null
+            val retry = synchronized(linkLock) {
+                if (inflight === cmd) {
+                    inflight = null
+                    flightId++
+                }
+                if (cmd.tries < 1) {
+                    queue.addFirst(cmd.copy(tries = cmd.tries + 1))
+                    true
+                } else {
+                    false
+                }
             }
-            listener.onStatus("write failed")
+            if (!retry) listener.onStatus("write failed")
+            pump()
         }
+    }
+
+    private fun armTimeout(id: Int) {
+        main.postDelayed({
+            val stuck = synchronized(linkLock) {
+                if (inflight != null && flightId == id) {
+                    inflight = null
+                    queue.clear()
+                    flightId++
+                    true
+                } else {
+                    false
+                }
+            }
+            if (stuck && wantLink) {
+                listener.onStatus("no reply from companion")
+                scan()
+            }
+        }, 4000)
     }
 
     @SuppressLint("MissingPermission")
@@ -388,7 +592,14 @@ class MeshCompanion(
         synchronized(linkLock) {
             queue.clear()
             inflight = null
+            flightId++
+            pullAfter = false
         }
+        protocolStarted = false
+        mtuStarted = false
+        mtuGatePosted = false
+        servicesRequested = false
+        mtu = 23
         try {
             gatt?.close()
         } catch (_: SecurityException) {
@@ -400,6 +611,7 @@ class MeshCompanion(
 
     companion object {
         const val CHANNEL_NAME = "#senseMB"
+        private const val MIN_MTU = 53
         private val SERVICE: UUID = UUID.fromString("6e400001-b5a3-f393-e0a9-e50e24dcca9e")
         private val RX_CHAR: UUID = UUID.fromString("6e400002-b5a3-f393-e0a9-e50e24dcca9e")
         private val TX_CHAR: UUID = UUID.fromString("6e400003-b5a3-f393-e0a9-e50e24dcca9e")
@@ -455,6 +667,15 @@ class MeshCompanion(
             }
             if (frame.size <= at) return ""
             return frame.copyOfRange(at, frame.size).toString(Charsets.UTF_8).trim('\u0000', ' ')
+        }
+
+        private fun bondedDevice(intent: Intent): BluetoothDevice? {
+            return if (Build.VERSION.SDK_INT >= 33) {
+                intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
+            } else {
+                @Suppress("DEPRECATION")
+                intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
+            }
         }
     }
 }

@@ -50,8 +50,10 @@ class RadarService : Service(), MeshCompanion.Listener {
         super.onCreate()
         notifications = getSystemService(NotificationManager::class.java)
         createChannels()
-        startAsForeground("H4Motion idle")
         companion = MeshCompanion(this, this)
+        if (!startAsForeground("H4Motion idle")) {
+            stopSelf()
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
@@ -173,7 +175,7 @@ class RadarService : Service(), MeshCompanion.Listener {
         notifications.notify(alertSerial++.also { if (it > 4000) alertSerial = 10 }, notification)
     }
 
-    private fun startAsForeground(text: String) {
+    private fun startAsForeground(text: String): Boolean {
         val notification = NotificationCompat.Builder(this, CHANNEL_LINK)
             .setSmallIcon(android.R.drawable.stat_sys_data_bluetooth)
             .setContentTitle("H4Motion")
@@ -182,10 +184,15 @@ class RadarService : Service(), MeshCompanion.Listener {
             .setContentIntent(openIntent())
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
-        if (Build.VERSION.SDK_INT >= 29) {
-            startForeground(ONGOING_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
-        } else {
-            startForeground(ONGOING_ID, notification)
+        return try {
+            if (Build.VERSION.SDK_INT >= 29) {
+                startForeground(ONGOING_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
+            } else {
+                startForeground(ONGOING_ID, notification)
+            }
+            true
+        } catch (_: SecurityException) {
+            false
         }
     }
 

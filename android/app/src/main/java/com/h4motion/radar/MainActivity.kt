@@ -19,6 +19,10 @@ import androidx.core.content.ContextCompat
 
 class MainActivity : AppCompatActivity() {
     private var service: RadarService.LocalBinder? = null
+    private var bound = false
+    private var permissionPending = false
+    private var pendingScan = false
+    private var pendingDemo = false
     private var unlisten: (() -> Unit)? = null
     private lateinit var status: TextView
     private lateinit var banner: TextView
@@ -29,6 +33,13 @@ class MainActivity : AppCompatActivity() {
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
             service = binder as RadarService.LocalBinder
+            if (pendingScan) {
+                pendingScan = false
+                service?.scan()
+            } else if (pendingDemo) {
+                pendingDemo = false
+                service?.toggleDemo()
+            }
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {
@@ -38,7 +49,19 @@ class MainActivity : AppCompatActivity() {
 
     private val permissions = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
-    ) { /* buttons stay usable; scan reports a missing permission itself */ }
+    ) {
+        permissionPending = false
+        val scan = pendingScan
+        val demo = pendingDemo
+        if (!scan && !demo) return@registerForActivityResult
+        if (!permissionsReady()) {
+            pendingScan = false
+            pendingDemo = false
+            RadarHub.update { it.copy(status = "Bluetooth and notification permission required") }
+            return@registerForActivityResult
+        }
+        withService()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -49,16 +72,9 @@ class MainActivity : AppCompatActivity() {
         radar = findViewById(R.id.radar)
         rangeButton = findViewById(R.id.btnRange)
 
-        findViewById<Button>(R.id.btnScan).setOnClickListener {
-            ensurePermissions()
-            service?.scan()
-        }
-        findViewById<Button>(R.id.btnDemo).setOnClickListener { service?.toggleDemo() }
+        findViewById<Button>(R.id.btnScan).setOnClickListener { requestAction(scan = true) }
+        findViewById<Button>(R.id.btnDemo).setOnClickListener { requestAction(scan = false) }
         rangeButton.setOnClickListener { service?.cycleRange() }
-
-        ContextCompat.startForegroundService(this, Intent(this, RadarService::class.java))
-        bindService(Intent(this, RadarService::class.java), connection, Context.BIND_AUTO_CREATE)
-        ensurePermissions()
     }
 
     override fun onStart() {
@@ -73,8 +89,36 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
-        unbindService(connection)
+        if (bound) {
+            unbindService(connection)
+            bound = false
+        }
         super.onDestroy()
+    }
+
+    private fun requestAction(scan: Boolean) {
+        pendingScan = scan
+        pendingDemo = !scan
+        if (!permissionsReady()) {
+            ensurePermissions()
+            return
+        }
+        withService()
+    }
+
+    private fun withService() {
+        if (!bound) {
+            ContextCompat.startForegroundService(this, Intent(this, RadarService::class.java))
+            bindService(Intent(this, RadarService::class.java), connection, Context.BIND_AUTO_CREATE)
+            bound = true
+        }
+        val ready = service ?: return
+        val scan = pendingScan
+        val demo = pendingDemo
+        pendingScan = false
+        pendingDemo = false
+        if (scan) ready.scan()
+        else if (demo) ready.toggleDemo()
     }
 
     private fun render(state: RadarHub.State) {
@@ -96,6 +140,17 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun permissionsReady(): Boolean {
+        if (Build.VERSION.SDK_INT >= 33 && !granted(Manifest.permission.POST_NOTIFICATIONS)) return false
+        if (Build.VERSION.SDK_INT >= 31) {
+            if (!granted(Manifest.permission.BLUETOOTH_SCAN)) return false
+            if (!granted(Manifest.permission.BLUETOOTH_CONNECT)) return false
+        } else if (!granted(Manifest.permission.ACCESS_FINE_LOCATION)) {
+            return false
+        }
+        return true
+    }
+
     private fun ensurePermissions() {
         val needed = ArrayList<String>()
         if (Build.VERSION.SDK_INT >= 33 && !granted(Manifest.permission.POST_NOTIFICATIONS)) {
@@ -107,7 +162,9 @@ class MainActivity : AppCompatActivity() {
         } else if (!granted(Manifest.permission.ACCESS_FINE_LOCATION)) {
             needed.add(Manifest.permission.ACCESS_FINE_LOCATION)
         }
-        if (needed.isNotEmpty()) permissions.launch(needed.toTypedArray())
+        if (needed.isEmpty() || permissionPending) return
+        permissionPending = true
+        permissions.launch(needed.toTypedArray())
     }
 
     private fun granted(permission: String): Boolean {

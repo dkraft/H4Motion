@@ -105,6 +105,22 @@ def main():
     check(parse_line("RD n=0 st=CLEAR") == ("RD", 0, "CLEAR", []), "clear heartbeat")
     al = parse_line("AL NEAR d=1.9 az=-25 x=-782 y=1713 s=-16")
     check(al == ("AL", "NEAR", 1.9, -25, -782, 1713, -16), "NEAR alert")
+    bad_tail = bytearray(sample)
+    bad_tail[29] = 0x00
+    try:
+        decode_frame(bytes(bad_tail))
+        check(False, "bad tail rejected")
+    except AssertionError:
+        check(True, "bad tail rejected")
+
+    sentinel = bytearray(sample)
+    sentinel[8] = 0xF8
+    sentinel[9] = 0x00
+    check(decode_frame(bytes(sentinel))[0][4] is False, "speed 248 is not a target")
+    sentinel[8] = 0x00
+    sentinel[9] = 0x01
+    check(decode_frame(bytes(sentinel))[0][4] is False, "speed 256 is not a target")
+
     check(parse_line("hello") is None, "garbage is ignored")
     check(parse_line("NotANode: RD n=2 st=ENTER 1,2,3 -4,5,-6")[3] == [(1, 2, 3), (-4, 5, -6)],
           "two targets")

@@ -28,3 +28,6 @@ clean:
 
 test:
 	python3 tools/test_wire.py
+	g++ -std=c++17 -Wall -Wextra -I tools/host_stubs -I firmware -o /tmp/h4motion-host \
+	  tools/host_motion_test.cpp firmware/MotionLogic.cpp firmware/Rd03d.cpp -lm
+	/tmp/h4motion-host

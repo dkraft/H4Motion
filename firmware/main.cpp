@@ -127,6 +127,7 @@ void halt() {
 }
 
 static char command[160];
+static bool command_overflow = false;
 
 void setup() {
   Serial.begin(115200);
@@ -200,28 +201,35 @@ void setup() {
 }
 
 void loop() {
-  int len = strlen(command);
-  while (Serial.available() && len < (int)sizeof(command) - 1) {
+  while (Serial.available()) {
     char c = Serial.read();
-    if (c != '\n') {
-      command[len++] = c;
-      command[len] = 0;
+    if (c == '\r' || c == '\n') {
+      if (!command_overflow && command[0]) {
+        char reply[160];
+        reply[0] = 0;
+        the_mesh.handleCommand(0, command, reply);
+        if (reply[0]) {
+          Serial.print("  -> ");
+          Serial.println(reply);
+        } else {
+          Serial.println();
+        }
+      }
+      command_overflow = false;
+      command[0] = 0;
+      continue;
     }
+    if (command_overflow) continue;
+    size_t len = strlen(command);
+    if (len >= sizeof(command) - 1) {
+      command_overflow = true;
+      command[0] = 0;
+      Serial.println("\nline too long");
+      continue;
+    }
+    command[len] = c;
+    command[len + 1] = 0;
     Serial.print(c);
-  }
-  if (len == (int)sizeof(command) - 1) {
-    command[sizeof(command) - 1] = '\r';
-  }
-
-  if (len > 0 && command[len - 1] == '\r') {
-    command[len - 1] = 0;
-    char reply[160];
-    the_mesh.handleCommand(0, command, reply);
-    if (reply[0]) {
-      Serial.print("  -> ");
-      Serial.println(reply);
-    }
-    command[0] = 0;
   }
 
   the_mesh.loop();

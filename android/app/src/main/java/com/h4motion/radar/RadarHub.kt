@@ -25,14 +25,23 @@ object RadarHub {
     private val main = Handler(Looper.getMainLooper())
 
     fun set(next: State) {
-        state = next
-        main.post {
-            for (listener in listeners) listener(next)
-        }
+        synchronized(this) { state = next }
+        publish(next)
     }
 
     fun update(block: (State) -> State) {
-        set(block(state))
+        val next: State
+        synchronized(this) {
+            next = block(state)
+            state = next
+        }
+        publish(next)
+    }
+
+    private fun publish(next: State) {
+        main.post {
+            for (listener in listeners) listener(next)
+        }
     }
 
     fun listen(listener: (State) -> Unit): () -> Unit {

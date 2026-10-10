@@ -78,12 +78,13 @@ private:
   uint32_t _heart_ms = RD03_HEART_SECS * 1000u;
   int _near_mm = RD03_NEAR_MM;
   bool _force = false;
-  bool _pending_alert = false;
   bool _have_hold = false;
   int16_t _hold_mm = 0;
   int16_t _hold_az = 0;
   int16_t _hold_x = 0;
   int16_t _hold_y = 0;
   int16_t _hold_s = 0;
-  char _pending[160];
+  static const int kAlertQ = 4;
+  char _aq[kAlertQ][96];
+  uint8_t _aq_n = 0;
 };
