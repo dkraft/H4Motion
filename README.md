@@ -1,6 +1,6 @@
 # H4Motion
 
-RD-03D radar on a **Heltec WiFi LoRa 32 V4**, reporting as a MeshCore sensor on hashtag channel **`#senseMB`**. The Android app draws a radar scope from those messages and raises an alert when someone enters or comes inside 2.5 m.
+RD-03D radar on a **Heltec WiFi LoRa 32 V4**, reporting as a MeshCore sensor on hashtag channel **`#sensemb`**. The Android app draws a radar scope from those messages and raises an alert when someone enters or comes inside 2.5 m.
 
 The radio module is a Heltec WiFi LoRa 32 V4. The sensor is the same shape as a MeshCore `simple_sensor` build. It does not use BLE companion mode, so the phone talks to a separate companion radio (the one you already use with the MeshCore app).
 
@@ -26,12 +26,12 @@ Official RD-03D UART is 3.3 V TTL. Do not put a 5 V serial line on GPIO47. Power
 
 ## Channel
 
-Reports go to **`#senseMB`**.
+Reports go to **`#sensemb`**.
 
-The key is the first 16 bytes of `sha256("#senseMB")`:
+The key is the first 16 bytes of `sha256("#sensemb")`:
 
 ```
-a95086e05a39519c2148b79f1d527c04
+0d50fd356561e0129e349d3667462198
 ```
 
 In the MeshCore app, or on the companion the Android app uses, join that hashtag. Anyone who knows the name can read it.
@@ -104,7 +104,7 @@ The user button queues `rd report`. The OLED shows the count, the last alert, ra
 
 1. Allow Bluetooth and notifications, then tap **Scan**. The service does not start until those are granted.
 2. When Android asks, enter the companion's BLE PIN. The companion UART requires an encrypted bond. Being nearby is not enough, and this app is not the sensor.
-3. The app finds the companion Nordic UART service, joins `#senseMB` if a channel slot is free, and draws tracks.
+3. The app finds the companion Nordic UART service, joins `#sensemb` if a channel slot is free, and draws tracks.
 4. **ENTER** and **NEAR** post a high-priority notification. The service stays in the foreground so that still happens with the screen covered.
 5. **Demo** walks a fake target down the scope without a radio. **4 m / 8 m / 16 m** changes the ring scale.
 
@@ -117,7 +117,7 @@ The scope is the same frame as the firmware: center is the sensor, up is +Y, rig
 ```
 firmware/     RD-03D parser, alert state, channel send, OLED
 extra/        PlatformIO env heltec_v4_motion
-android/      radar scope and #senseMB alerts
+android/      radar scope and #sensemb alerts
 tools/        host checks for the frame decoder and the text lines
 MeshCore/     created by make setup, not committed
 ```

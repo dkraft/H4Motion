@@ -1,7 +1,7 @@
 package com.h4motion.radar
 
 /**
- * Lines flooded by the Heltec V4 sensor onto MeshCore channel #senseMB.
+ * Lines flooded by the Heltec V4 sensor onto MeshCore channel #sensemb.
  * Kept in step with tools/test_wire.py.
  *
  *   RD n=<count> st=<CLEAR|MOVE|ENTER|LEAVE|NEAR> x,y,spd ...

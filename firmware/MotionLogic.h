@@ -14,7 +14,7 @@
 #define RD03_HEART_SECS 60
 #endif
 
-// Wire text on MeshCore channel #senseMB (no node-name prefix; ChannelOut adds that):
+// Wire text on MeshCore channel #sensemb (no node-name prefix; ChannelOut adds that):
 //   RD n=<0-3> st=<CLEAR|MOVE|ENTER|LEAVE|NEAR> <x_mm>,<y_mm>,<spd_cm_s> ...
 //   AL <ENTER|LEAVE|NEAR> d=<m.m> az=<deg> x=<mm> y=<mm> s=<cm/s>
 // +Y is straight ahead, +X is to the right. az 0 is ahead, positive is right.

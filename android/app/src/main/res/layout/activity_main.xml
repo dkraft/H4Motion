@@ -12,7 +12,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:fontFamily="monospace"
-        android:text="H4Motion  #senseMB  idle"
+        android:text="H4Motion  #sensemb  idle"
         android:textColor="#B7E7C7"
         android:textSize="13sp" />
 

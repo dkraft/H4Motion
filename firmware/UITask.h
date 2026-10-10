@@ -20,7 +20,7 @@ public:
   UITask(DisplayDriver& display)
     : _display(&display), _next_read(0), _next_refresh(0),
       _prevBtnState(HIGH), _press_latched(false), _node_prefs(nullptr),
-      _channel_name("#senseMB"), _frames_ok(0) {
+      _channel_name("#sensemb"), _frames_ok(0) {
     memset(&_snap, 0, sizeof(_snap));
   }
   void begin(NodePrefs* node_prefs, const char* build_date, const char* firmware_version);

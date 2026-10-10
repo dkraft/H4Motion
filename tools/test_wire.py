@@ -125,10 +125,10 @@ def main():
     check(parse_line("NotANode: RD n=2 st=ENTER 1,2,3 -4,5,-6")[3] == [(1, 2, 3), (-4, 5, -6)],
           "two targets")
 
-    # Channel hashtag key, first 16 bytes of sha256("#senseMB").
+    # Channel hashtag key, first 16 bytes of sha256("#sensemb").
     import hashlib
-    key = hashlib.sha256(b"#senseMB").hexdigest()[:32]
-    check(key == "a95086e05a39519c2148b79f1d527c04", "hashtag key")
+    key = hashlib.sha256(b"#sensemb").hexdigest()[:32]
+    check(key == "0d50fd356561e0129e349d3667462198", "hashtag key")
 
     if fails:
         print(fails, "failed")

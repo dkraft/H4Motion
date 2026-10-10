@@ -26,8 +26,8 @@ import java.util.ArrayDeque
 import java.util.UUID
 
 /**
- * Minimal MeshCore companion client. It joins hashtag channel #senseMB
- * (secret = first 16 bytes of SHA-256("#senseMB")) and forwards channel text.
+ * Minimal MeshCore companion client. It joins hashtag channel #sensemb
+ * (secret = first 16 bytes of SHA-256("#sensemb")) and forwards channel text.
  *
  * The companion UART characteristics require an encrypted, authenticated bond.
  * Frames follow MeshCore docs/companion_protocol.md. One command is in flight
@@ -408,12 +408,12 @@ class MeshCompanion(
     private fun finishChannels(found: Int, empty: Int) {
         if (found >= 0) {
             senseIdx = found
-            listener.onStatus("#senseMB on slot $found")
+            listener.onStatus("#sensemb on slot $found")
             pullQueue()
             return
         }
         if (empty < 0) {
-            listener.onStatus("no free channel slot for #senseMB")
+            listener.onStatus("no free channel slot for #sensemb")
             return
         }
         val frame = ByteArray(50)
@@ -424,10 +424,10 @@ class MeshCompanion(
         send(frame, setOf(OK, ERR)) { resp ->
             if ((resp[0].toInt() and 0xFF) == OK) {
                 senseIdx = empty
-                listener.onStatus("#senseMB joined on slot $empty")
+                listener.onStatus("#sensemb joined on slot $empty")
                 pullQueue()
             } else {
-                listener.onStatus("could not join #senseMB")
+                listener.onStatus("could not join #sensemb")
             }
         }
     }
@@ -439,13 +439,13 @@ class MeshCompanion(
 
     private fun syncOne() {
         if (syncLeft-- <= 0) {
-            listener.onStatus("live on #senseMB")
+            listener.onStatus("live on #sensemb")
             return
         }
         send(byteArrayOf(SYNC_NEXT.toByte()), setOf(CHANNEL_MSG, CHANNEL_MSG_V3, NO_MORE, ERR, 0x07, 0x10)) { frame ->
             val code = frame[0].toInt() and 0xFF
             if (code == NO_MORE || code == ERR) {
-                listener.onStatus("live on #senseMB")
+                listener.onStatus("live on #sensemb")
                 return@send
             }
             if (code == CHANNEL_MSG || code == CHANNEL_MSG_V3) deliver(frame)
@@ -610,7 +610,7 @@ class MeshCompanion(
     }
 
     companion object {
-        const val CHANNEL_NAME = "#senseMB"
+        const val CHANNEL_NAME = "#sensemb"
         private const val MIN_MTU = 53
         private val SERVICE: UUID = UUID.fromString("6e400001-b5a3-f393-e0a9-e50e24dcca9e")
         private val RX_CHAR: UUID = UUID.fromString("6e400002-b5a3-f393-e0a9-e50e24dcca9e")

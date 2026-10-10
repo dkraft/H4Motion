@@ -122,7 +122,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun render(state: RadarHub.State) {
-        status.text = "H4Motion  #senseMB  ${state.status}"
+        status.text = "H4Motion  #sensemb  ${state.status}"
         radar.rangeM = state.rangeM
         radar.blips = state.blips
         rangeButton.text = "${state.rangeM} m"

@@ -80,7 +80,7 @@ class RadarService : Service(), MeshCompanion.Listener {
             demoEntered = false
             demoNear = false
             linkStatus = "demo"
-            RadarHub.update { it.copy(demo = true, status = "demo on #senseMB", blips = emptyList(), alert = null) }
+            RadarHub.update { it.copy(demo = true, status = "demo on #sensemb", blips = emptyList(), alert = null) }
             startAsForeground("demo track")
             main.post(demoTick)
         } else {
@@ -114,7 +114,7 @@ class RadarService : Service(), MeshCompanion.Listener {
         linkStatus = text
         if (!demo) {
             RadarHub.update { it.copy(status = text, demo = false) }
-            val ongoing = if (text.startsWith("live")) "listening on #senseMB" else text
+            val ongoing = if (text.startsWith("live")) "listening on #sensemb" else text
             startAsForeground(ongoing)
         }
     }
@@ -208,7 +208,7 @@ class RadarService : Service(), MeshCompanion.Listener {
         notifications.createNotificationChannel(
             NotificationChannel(CHANNEL_LINK, "Radar link", NotificationManager.IMPORTANCE_LOW).apply {
                 setSound(null, null)
-                description = "Stays up while H4Motion is listening on #senseMB"
+                description = "Stays up while H4Motion is listening on #sensemb"
             }
         )
         notifications.createNotificationChannel(

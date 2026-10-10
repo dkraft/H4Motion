@@ -9,7 +9,7 @@
 #endif
 
 #ifndef SENSE_CHANNEL_NAME
-#define SENSE_CHANNEL_NAME "#senseMB"
+#define SENSE_CHANNEL_NAME "#sensemb"
 #endif
 
 static Rd03d radar;
