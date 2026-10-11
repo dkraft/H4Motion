@@ -2,6 +2,8 @@
 #include "Rd03d.h"
 #include "MotionLogic.h"
 #include "ChannelOut.h"
+#include "WifiArgs.h"
+#include "WifiLink.h"
 
 #ifdef DISPLAY_CLASS
   #include "UITask.h"
@@ -15,31 +17,89 @@
 static Rd03d radar;
 static MotionLogic motion;
 static ChannelOut channel;
+static WifiLink wifi;
+static bool want_wifi = false;
 static const char* kPrefsPath = "/h4motion.txt";
+static const char* kDefaultSsid = "BPSSI";
+static const char* kDefaultPass = "KoalaBear";
+
+static const char* linkTag() {
+  if (want_wifi && wifi.connected()) return "W";
+  if (want_wifi) return "w";
+  return "L";
+}
+
+static void replyWifiStatus(char* reply) {
+  if (!wifi.hasCreds()) strcpy(reply, "wifi off");
+  else if (wifi.connected()) snprintf(reply, 48, "wifi %s", wifi.ip());
+  else if (wifi.connecting()) strcpy(reply, "wifi joining");
+  else if (wifi.failed()) strcpy(reply, "wifi fail");
+  else strcpy(reply, "wifi off");
+}
+
+static void replyLinkStatus(char* reply) {
+  if (want_wifi && wifi.connected()) snprintf(reply, 48, "link wifi %s", wifi.ip());
+  else if (want_wifi && wifi.connecting()) strcpy(reply, "link wait");
+  else if (want_wifi && wifi.failed()) strcpy(reply, "wifi fail");
+  else if (wifi.connected()) snprintf(reply, 48, "link lora %s", wifi.ip());
+  else strcpy(reply, "link lora");
+}
 
 static void savePrefs() {
   File f = SPIFFS.open(kPrefsPath, "w");
   if (!f) return;
+  char pass[64];
+  wifi.copyPass(pass, sizeof(pass));
   f.printf("interval %d\n", motion.trackSecs());
   f.printf("near %d\n", motion.nearMm());
   f.printf("heart %d\n", motion.heartSecs());
+  f.printf("ssid %s\n", wifi.ssid());
+  f.printf("pass %s\n", pass);
+  f.printf("link %s\n", want_wifi ? "wifi" : "lora");
   f.close();
+  memset(pass, 0, sizeof(pass));
 }
 
 static void loadPrefs() {
   File f = SPIFFS.open(kPrefsPath, "r");
   if (!f) return;
-  char buf[64];
+  char buf[96];
+  char ssid[33];
+  char pass[64];
+  bool saw_ssid = false;
+  ssid[0] = 0;
+  pass[0] = 0;
   while (f.available()) {
     int n = f.readBytesUntil('\n', buf, sizeof(buf) - 1);
     if (n <= 0) continue;
     buf[n] = 0;
     if (buf[n - 1] == '\r') buf[n - 1] = 0;
+    if (n == (int)sizeof(buf) - 1) {
+      while (f.available()) {
+        int c = f.read();
+        if (c < 0 || c == '\n') break;
+      }
+      continue;
+    }
     if (memcmp(buf, "interval ", 9) == 0) motion.setTrackSecs(atoi(buf + 9));
     else if (memcmp(buf, "near ", 5) == 0) motion.setNearMm(atoi(buf + 5));
     else if (memcmp(buf, "heart ", 6) == 0) motion.setHeartSecs(atoi(buf + 6));
+    else if (memcmp(buf, "ssid ", 5) == 0) {
+      strncpy(ssid, buf + 5, sizeof(ssid) - 1);
+      ssid[sizeof(ssid) - 1] = 0;
+      saw_ssid = true;
+    } else if (memcmp(buf, "pass ", 5) == 0) {
+      strncpy(pass, buf + 5, sizeof(pass) - 1);
+      pass[sizeof(pass) - 1] = 0;
+    } else if (strcmp(buf, "link wifi") == 0) {
+      want_wifi = true;
+    } else if (strcmp(buf, "link lora") == 0) {
+      want_wifi = false;
+    }
   }
   f.close();
+  if (saw_ssid && ssid[0]) wifi.setCreds(ssid, pass);
+  memset(pass, 0, sizeof(pass));
 }
 
 class MyMesh : public SensorMesh {
@@ -72,11 +132,70 @@ protected:
     const MotionSnapshot& s = motion.snap();
     if (strcmp(command, "rd") == 0) {
       int tenths = s.closest_mm < 0 ? 0 : (s.closest_mm + 50) / 100;
-      sprintf(reply, "n=%u %s d=%d.%d near=%d int=%ds heart=%ds ok=%lu bad=%lu",
+      uint8_t raw[8];
+      int raw_n = radar.lastBytes(raw, 8);
+      char hex[8 * 3 + 1];
+      int hp = 0;
+      for (int i = 0; i < raw_n && hp < (int)sizeof(hex) - 3; i++) {
+        hp += sprintf(hex + hp, "%02x ", raw[i]);
+      }
+      hex[hp] = 0;
+      sprintf(reply, "n=%u %s d=%d.%d near=%d int=%ds heart=%ds ok=%lu bad=%lu rx=%lu %s%s",
               s.n, MotionLogic::stateName(s.st),
               tenths / 10, tenths % 10,
               motion.nearMm(), motion.trackSecs(), motion.heartSecs(),
-              (unsigned long)radar.framesOk(), (unsigned long)radar.framesBad());
+              (unsigned long)radar.framesOk(), (unsigned long)radar.framesBad(),
+              (unsigned long)radar.bytesRx(), hex, linkTag());
+      return true;
+    }
+    if (strcmp(command, "wifi") == 0 || memcmp(command, "wifi ", 5) == 0) {
+      WifiArgs args;
+      const char* rest = (command[4] == 0) ? "" : command + 5;
+      if (!parseWifiCommand(rest, &args)) {
+        strcpy(reply, "wifi bad");
+        return true;
+      }
+      if (args.status_only) {
+        replyWifiStatus(reply);
+        return true;
+      }
+      if (!wifi.setCreds(args.ssid, args.pass)) {
+        strcpy(reply, "wifi bad");
+        return true;
+      }
+      memset(args.pass, 0, sizeof(args.pass));
+      savePrefs();
+      wifi.connect();
+      strcpy(reply, "wifi joining");
+      return true;
+    }
+    if (strcmp(command, "link") == 0) {
+      replyLinkStatus(reply);
+      return true;
+    }
+    if (strcmp(command, "link lora") == 0) {
+      want_wifi = false;
+      savePrefs();
+      replyLinkStatus(reply);
+      return true;
+    }
+    if (strcmp(command, "link wifi") == 0) {
+      if (!wifi.hasCreds()) {
+        want_wifi = false;
+        savePrefs();
+        strcpy(reply, "wifi fail");
+        return true;
+      }
+      if (wifi.failed()) {
+        want_wifi = false;
+        savePrefs();
+        strcpy(reply, "wifi fail");
+        return true;
+      }
+      want_wifi = true;
+      savePrefs();
+      if (!wifi.connected() && !wifi.connecting()) wifi.connect();
+      replyLinkStatus(reply);
       return true;
     }
     if (strcmp(command, "rd report") == 0) {
@@ -183,7 +302,20 @@ void setup() {
 #endif
 
   motion.begin(millis());
+  wifi.begin();
   loadPrefs();
+  if (!wifi.hasCreds()) {
+    wifi.setCreds(kDefaultSsid, kDefaultPass);
+    want_wifi = true;
+  }
+  if (wifi.hasCreds()) wifi.connect();
+  // A board that already booted still has the old compiled default saved.
+  NodePrefs* prefs = the_mesh.getNodePrefs();
+  if (prefs->password[0] == 0 || strcmp(prefs->password, "password") == 0) {
+    strncpy(prefs->password, ADMIN_PASSWORD, sizeof(prefs->password) - 1);
+    prefs->password[sizeof(prefs->password) - 1] = 0;
+    the_mesh.savePrefs();
+  }
   radar.begin();
 
 #ifdef SENSE_CHANNEL_PSK
@@ -235,6 +367,7 @@ void loop() {
   the_mesh.loop();
   sensors.loop();
   radar.loop();
+  wifi.loop();
 
   RdTarget frame[RD03_MAX_TARGETS];
   if (radar.takeFrame(frame)) {
@@ -254,15 +387,18 @@ void loop() {
 
 #ifdef DISPLAY_CLASS
   if (ui_task.consumeUserPress()) motion.forceReport();
-  ui_task.setSnapshot(motion.snap(), channel.name(), radar.framesOk());
+  ui_task.setSnapshot(motion.snap(), channel.name(), radar.framesOk(), linkTag());
   ui_task.loop();
 #endif
 
   char line[160];
   bool is_alert = false;
-  if (motion.takeMessage(millis(), line, sizeof(line), &is_alert)) {
-    Serial.printf("mesh %s%s\n", is_alert ? "ALERT " : "", line);
-    channel.sendText(the_mesh, *the_mesh.getRTCClock(), the_mesh.getNodeName(), line);
+  bool on_wifi = want_wifi && wifi.connected();
+  if (motion.takeMessage(millis(), line, sizeof(line), &is_alert, on_wifi)) {
+    bool lora = is_alert || !on_wifi;
+    Serial.printf("%s %s%s\n", lora ? "mesh" : "wifi", is_alert ? "ALERT " : "", line);
+    if (lora) channel.sendText(the_mesh, *the_mesh.getRTCClock(), the_mesh.getNodeName(), line);
+    else wifi.sendLine(line);
   }
 
   rtc_clock.tick();

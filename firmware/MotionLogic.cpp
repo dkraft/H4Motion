@@ -5,6 +5,7 @@
 #include <string.h>
 
 static const uint32_t kAirGapMs = 800;
+static const uint32_t kFastTrackMs = 100;
 static const uint32_t kLeaveMs = 1500;
 static const uint32_t kBannerMs = 4000;
 
@@ -205,30 +206,37 @@ void MotionLogic::tick(uint32_t now_ms) {
   }
 }
 
-bool MotionLogic::takeMessage(uint32_t now_ms, char* out, size_t out_len, bool* is_alert) {
+bool MotionLogic::takeMessage(uint32_t now_ms, char* out, size_t out_len, bool* is_alert, bool fast_tracks) {
   tick(now_ms);
   if (_banner_until && (int32_t)(now_ms - _banner_until) >= 0 && _aq_n == 0) {
     _snap.banner[0] = 0;
     _banner_until = 0;
   }
-  if ((uint32_t)(now_ms - _last_tx_ms) < kAirGapMs) return false;
 
+  const bool air_open = (uint32_t)(now_ms - _last_tx_ms) >= kAirGapMs;
   if (_aq_n > 0) {
-    snprintf(out, out_len, "%s", _aq[0]);
-    memmove(_aq[0], _aq[1], sizeof(_aq[0]) * (_aq_n - 1));
-    _aq_n--;
-    _last_tx_ms = now_ms;
-    _last_track_ms = now_ms;
-    if (is_alert) *is_alert = true;
-    return true;
+    if (!air_open) {
+      if (!fast_tracks) return false;
+    } else {
+      snprintf(out, out_len, "%s", _aq[0]);
+      memmove(_aq[0], _aq[1], sizeof(_aq[0]) * (_aq_n - 1));
+      _aq_n--;
+      _last_tx_ms = now_ms;
+      _last_track_ms = now_ms;
+      if (is_alert) *is_alert = true;
+      return true;
+    }
+  } else if (!fast_tracks && !air_open) {
+    return false;
   }
 
-  if (_force || (_occupied && (uint32_t)(now_ms - _last_track_ms) >= _track_ms)) {
+  const uint32_t track_gap = fast_tracks ? kFastTrackMs : _track_ms;
+  if (_force || (_occupied && (uint32_t)(now_ms - _last_track_ms) >= track_gap)) {
     TrackState st = _occupied ? (_near_latched ? ST_NEAR : ST_MOVE) : ST_CLEAR;
     formatRd(out, out_len, st);
     _force = false;
     _last_track_ms = now_ms;
-    _last_tx_ms = now_ms;
+    if (!fast_tracks) _last_tx_ms = now_ms;
     if (!_occupied) _last_heart_ms = now_ms;
     if (is_alert) *is_alert = false;
     return true;
@@ -237,7 +245,7 @@ bool MotionLogic::takeMessage(uint32_t now_ms, char* out, size_t out_len, bool* 
   if (!_occupied && (uint32_t)(now_ms - _last_heart_ms) >= _heart_ms) {
     formatRd(out, out_len, ST_CLEAR);
     _last_heart_ms = now_ms;
-    _last_tx_ms = now_ms;
+    if (!fast_tracks) _last_tx_ms = now_ms;
     if (is_alert) *is_alert = false;
     return true;
   }

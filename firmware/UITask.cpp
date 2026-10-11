@@ -24,10 +24,11 @@ void UITask::begin(NodePrefs* node_prefs, const char* build_date, const char* fi
   _display->turnOn();
 }
 
-void UITask::setSnapshot(const MotionSnapshot& snap, const char* channel_name, uint32_t frames_ok) {
+void UITask::setSnapshot(const MotionSnapshot& snap, const char* channel_name, uint32_t frames_ok, const char* link_tag) {
   _snap = snap;
   _frames_ok = frames_ok;
   if (channel_name) _channel_name = channel_name;
+  if (link_tag && link_tag[0]) _link_tag = link_tag;
 }
 
 bool UITask::consumeUserPress() {
@@ -91,7 +92,8 @@ void UITask::renderCurrScreen() {
   _display->print(tmp);
 
   _display->setCursor(0, 54);
-  _display->print(_channel_name);
+  snprintf(tmp, sizeof(tmp), "%s %s", _channel_name, _link_tag);
+  _display->print(tmp);
 
   const int cx = 100;
   const int cy = 32;

@@ -6,17 +6,17 @@ The radio module is a Heltec WiFi LoRa 32 V4. The sensor is the same shape as a 
 
 ## Wiring
 
-The RD-03D silkscreen next to the white plug is `5V GND TX RX DP DM`. Use those names, not the test pads.
+The wires are on the round test pads, not the white connector. Left to right those pads are `RX TX GND DEBUG DP DM 5V`. The white plug is a different order (`5V GND TX RX DP DM`); leave it empty.
 
-| RD-03D | Heltec V4 |
+| RD-03D pad | Heltec V4 |
 | --- | --- |
 | 5V | 5V (USB VBUS) |
 | GND | GND |
-| TX | GPIO47 |
-| RX | GPIO48 |
+| TX | GPIO48 |
+| RX | GPIO47 |
 | DP, DM, DEBUG | leave open |
 
-GPIO47 is the Heltec RX. GPIO48 is the Heltec TX. The header pins are labeled `47` and `48`.
+The header pins are labeled `47` and `48`. The TX pad goes to the pin labeled `48`. The other way around stays silent.
 
 The onboard GPS already owns GPIO38/GPIO39, and the USB console owns the pins labeled RX/TX (GPIO44/GPIO43). The radar uses UART2 at **256000 8N1**.
 
@@ -71,7 +71,9 @@ lon <degrees>
 reboot
 ```
 
-Advert position is `0,0` until you set `lat` and `lon`. Admin password starts as `password`. Change it with `password <new>` before this node sits on a shared mesh.
+Advert position is `0,0` until you set `lat` and `lon`. The admin password is `123456`. This Heltec has no display, so that code is fixed instead of shown on a screen. Change it with `password <new>` before this node sits on a shared mesh.
+
+On a fresh board the sensor joins WiFi `BPSSI` and sends tracks there once the join succeeds. Alerts still go out on `#sensemb`. A saved `wifi` command replaces that network.
 
 ## Build / flash
 
@@ -95,8 +97,15 @@ The USB console accepts a command ended by Enter or Return. Serial and mesh admi
 | `rd interval 10` | seconds between tracks while occupied (2–120) |
 | `rd near 2500` | NEAR distance in millimeters |
 | `rd heart 60` | seconds between clear heartbeats |
+| `wifi` | join state, or `wifi off`. Never prints the passphrase |
+| `wifi <ssid> <password>` | store the network and start joining. Quote a field that contains spaces |
+| `link` | `link lora`, `link wifi <ip>`, `link wait`, or `wifi fail` |
+| `link lora` | flood tracks on `#sensemb`. WiFi stays associated |
+| `link wifi` | send tracks on TCP port 4040 once the join succeeds. Alerts still flood |
 
-The user button queues `rd report`. The OLED shows the count, the last alert, range and azimuth, and a small scope. Ahead is up, right is right.
+The passphrase is stored on the sensor and is not sent on `#sensemb`. A failed join leaves tracks on LoRa. The built-in network is `BPSSI`.
+
+The user button queues `rd report`. This board has no screen. The phone is the scope.
 
 ## Android
 
@@ -106,16 +115,17 @@ The user button queues `rd report`. The OLED shows the count, the last alert, ra
 2. When Android asks, enter the companion's BLE PIN. The companion UART requires an encrypted bond. Being nearby is not enough, and this app is not the sensor.
 3. The app finds the companion Nordic UART service, joins `#sensemb` if a channel slot is free, and draws tracks.
 4. **ENTER** and **NEAR** post a high-priority notification. The service stays in the foreground so that still happens with the screen covered.
-5. **Demo** walks a fake target down the scope without a radio. **4 m / 8 m / 16 m** changes the ring scale.
+5. **Config** replaces Demo on the main row. It is filled in with WiFi `BPSSI`, the sensor admin password `123456`, and tracks on WiFi. **Demo** is inside that screen and walks a fake target without a radio. **4 m / 8 m / 16 m** changes the ring scale.
+6. Apply logs into the sensor through the companion and sends `wifi` then `link`. That is a private CLI reply, so it can take a minute or two. The phone must be on the same LAN as the sensor. Tracks then arrive on TCP port 4040. **ENTER** and **NEAR** still arrive on `#sensemb`. Switching back to LoRa keeps the sensor on WiFi so the next switch is only a command.
 
-The scope is the same frame as the firmware: center is the sensor, up is +Y, right is +X. Closing targets are amber. Inside 2.5 m they are red.
+The phone scope is a 120° wedge, the forward field of the RD-03D. The sensor is at the bottom, up is +Y, and right is +X. A return outside that wedge is drawn on the nearest edge. Closing targets are amber. Inside 2.5 m they are red.
 
-`make test` checks the RD-03D frame and the occupancy machine on the host. `make build` produces the Heltec image. The debug APK is `android/app/build/outputs/apk/debug/app-debug.apk` after `assembleDebug` (JDK 17, compile SDK 34). The board was not flashed from here, and the app was not run on a phone, so the radar UART, the LoRa flood, and companion pairing are not confirmed on hardware.
+`make test` checks the RD-03D frame and the occupancy machine on the host. `make build` produces the Heltec image. The debug APK is `android/app/build/outputs/apk/debug/app-debug.apk` after `assembleDebug` (JDK 17, compile SDK 34). Version 0.1.3 is the sector scope, with admin password `123456` and default WiFi `BPSSI`.
 
 ## Layout
 
 ```
-firmware/     RD-03D parser, alert state, channel send, OLED
+firmware/     RD-03D parser, alert state, channel send, WiFi track socket, OLED
 extra/        PlatformIO env heltec_v4_motion
 android/      radar scope and #sensemb alerts
 tools/        host checks for the frame decoder and the text lines

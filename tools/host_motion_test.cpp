@@ -3,6 +3,7 @@
 
 #include "MotionLogic.h"
 #include "Rd03d.h"
+#include "WifiArgs.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -45,6 +46,11 @@ static void feedEmpty(MotionLogic& logic, uint32_t now) {
 static bool take(MotionLogic& logic, uint32_t now, char* buf, bool* alert) {
   buf[0] = 0;
   return logic.takeMessage(now, buf, 160, alert);
+}
+
+static bool takeFast(MotionLogic& logic, uint32_t now, char* buf, bool* alert) {
+  buf[0] = 0;
+  return logic.takeMessage(now, buf, 160, alert, true);
 }
 
 static void testDecode() {
@@ -208,9 +214,65 @@ static void testOccupancy() {
         buf);
 }
 
+static void testFastTracks() {
+  char buf[160];
+  bool alert = false;
+  MotionLogic logic;
+  logic.begin(0);
+  feed(logic, 100, 0, 6000, -16);
+  feed(logic, 200, 0, 6000, -16);
+  check(takeFast(logic, 200, buf, &alert) && !alert && strncmp(buf, "RD ", 3) == 0,
+        "fast track can update while an alert waits for LoRa");
+  check(takeFast(logic, 800, buf, &alert) && alert &&
+            strcmp(buf, "AL ENTER d=6.0 az=0 x=0 y=6000 s=-16") == 0,
+        buf);
+  check(!takeFast(logic, 850, buf, &alert), "fast track waits 100 ms");
+  check(takeFast(logic, 900, buf, &alert) && !alert && strncmp(buf, "RD ", 3) == 0,
+        "fast track does not wait out the LoRa air gap");
+  check(!takeFast(logic, 950, buf, &alert), "second fast track still waits 100 ms");
+}
+
+static void testWifiArgs() {
+  WifiArgs args;
+  check(parseWifiCommand("", &args) && args.status_only, "bare wifi is status");
+  check(parseWifiCommand("   ", &args) && args.status_only, "blank wifi is status");
+  check(parseWifiCommand("home secret", &args) && strcmp(args.ssid, "home") == 0 &&
+            strcmp(args.pass, "secret") == 0,
+        "ssid token and passphrase");
+  check(parseWifiCommand("home secret words", &args) && strcmp(args.pass, "secret words") == 0,
+        "passphrase keeps spaces");
+  check(parseWifiCommand("\"my net\" \"sec ret\"", &args) && strcmp(args.ssid, "my net") == 0 &&
+            strcmp(args.pass, "sec ret") == 0,
+        "quoted ssid and passphrase");
+  check(parseWifiCommand("home", &args) && args.pass[0] == 0 && strcmp(args.ssid, "home") == 0,
+        "open network has an empty passphrase");
+  check(parseWifiCommand("home \"\"", &args) && strcmp(args.ssid, "home") == 0 && args.pass[0] == 0,
+        "quoted empty passphrase is an open network");
+  check(!parseWifiCommand("\"\"", &args), "empty ssid is rejected");
+  check(!parseWifiCommand("\"noend", &args), "unclosed quote is rejected");
+  char long_ssid[40];
+  memset(long_ssid, 'a', 33);
+  long_ssid[33] = 0;
+  check(!parseWifiCommand(long_ssid, &args), "33-byte ssid is rejected");
+  char ok_ssid[40];
+  memset(ok_ssid, 'b', 32);
+  ok_ssid[32] = 0;
+  check(parseWifiCommand(ok_ssid, &args) && strlen(args.ssid) == 32, "32-byte ssid is accepted");
+  char long_pass[80];
+  memcpy(long_pass, "home ", 5);
+  memset(long_pass + 5, 'c', 64);
+  long_pass[69] = 0;
+  check(!parseWifiCommand(long_pass, &args), "64-byte passphrase is rejected");
+  long_pass[68] = 0;
+  check(parseWifiCommand(long_pass, &args) && strlen(args.pass) == 63, "63-byte passphrase is accepted");
+  check(!parseWifiCommand("home bad\"quote", &args), "quote in passphrase is rejected");
+}
+
 int main() {
   testDecode();
   testOccupancy();
+  testFastTracks();
+  testWifiArgs();
   if (g_fails) {
     printf("%d failed\n", g_fails);
     return 1;

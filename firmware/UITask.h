@@ -12,6 +12,7 @@ class UITask {
   NodePrefs* _node_prefs;
   MotionSnapshot _snap;
   const char* _channel_name;
+  const char* _link_tag;
   uint32_t _frames_ok;
 
   void renderCurrScreen();
@@ -20,11 +21,11 @@ public:
   UITask(DisplayDriver& display)
     : _display(&display), _next_read(0), _next_refresh(0),
       _prevBtnState(HIGH), _press_latched(false), _node_prefs(nullptr),
-      _channel_name("#sensemb"), _frames_ok(0) {
+      _channel_name("#sensemb"), _link_tag("L"), _frames_ok(0) {
     memset(&_snap, 0, sizeof(_snap));
   }
   void begin(NodePrefs* node_prefs, const char* build_date, const char* firmware_version);
-  void setSnapshot(const MotionSnapshot& snap, const char* channel_name, uint32_t frames_ok);
+  void setSnapshot(const MotionSnapshot& snap, const char* channel_name, uint32_t frames_ok, const char* link_tag);
   bool consumeUserPress();
   void loop();
 };

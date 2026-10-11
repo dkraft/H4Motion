@@ -37,6 +37,9 @@ public:
   bool takeFrame(RdTarget out[RD03_MAX_TARGETS]);
   uint32_t framesOk() const { return _ok; }
   uint32_t framesBad() const { return _bad; }
+  uint32_t bytesRx() const { return _rx; }
+  // Last bytes received, oldest first. Returns the count written.
+  int lastBytes(uint8_t* out, int max_n) const;
 
   static int16_t decodeSignMag(uint8_t lo, uint8_t hi);
   static bool decodeFrame(const uint8_t* frame30, RdTarget out[RD03_MAX_TARGETS]);
@@ -48,10 +51,12 @@ private:
   HardwareSerial _serial{2};
   uint8_t _buf[30];
   uint8_t _got = 0;
-  uint8_t _mode_left = 0;
   uint32_t _next_mode_ms = 0;
   uint32_t _ok = 0;
   uint32_t _bad = 0;
+  uint32_t _rx = 0;
+  uint8_t _tail[8];
+  uint32_t _tail_n = 0;
   bool _fresh = false;
   RdTarget _tgt[RD03_MAX_TARGETS];
 };

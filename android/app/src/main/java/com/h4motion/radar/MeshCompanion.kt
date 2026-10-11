@@ -41,6 +41,7 @@ class MeshCompanion(
     interface Listener {
         fun onStatus(text: String)
         fun onChannelText(text: String)
+        fun onLinkMode(wifi: Boolean, ip: String) {}
     }
 
     private val appContext = context.applicationContext
@@ -66,6 +67,12 @@ class MeshCompanion(
     private var writeAck = false
     private var repaired = false
     private var notifyTries = 0
+    private var configGen = 0
+    private var configBusy = false
+    private var cliWaiter: ((String) -> Unit)? = null
+    private var loginWaiter: ((Boolean) -> Unit)? = null
+    private var cliTimeout: Runnable? = null
+    private var loginTimeout: Runnable? = null
 
     private data class Cmd(
         val bytes: ByteArray,
@@ -106,8 +113,53 @@ class MeshCompanion(
         }, 12000)
     }
 
+    fun isReady(): Boolean = protocolStarted && gatt != null
+
+    /**
+     * Logs the companion into H4Motion and sends the private admin commands.
+     * The WiFi passphrase is only placed in the CLI frame. It is not logged
+     * and it is not sent on #sensemb.
+     */
+    fun configure(admin: String, ssid: String, wifiPass: String, useWifi: Boolean) {
+        if (!isReady()) {
+            listener.onStatus("scan the companion first")
+            return
+        }
+        if (mtu < 180) {
+            listener.onStatus("BLE MTU $mtu is too small for sensor setup")
+            return
+        }
+        val problem = credentialProblem(admin, ssid, wifiPass)
+        if (problem != null) {
+            listener.onStatus(problem)
+            return
+        }
+        cancelConfig()
+        val gen = configGen
+        configBusy = true
+        listener.onStatus("checking sensor contact")
+        send(getContactFrame(), setOf(RESP_CONTACT, ERR)) got@{ frame ->
+            if (!sameConfig(gen)) return@got
+            val code = frame[0].toInt() and 0xFF
+            if (code == ERR) {
+                listener.onStatus("adding H4Motion contact")
+                send(addContactFrame(), setOf(OK, ERR)) added@{ added ->
+                    if (!sameConfig(gen)) return@added
+                    if ((added[0].toInt() and 0xFF) != OK) {
+                        failConfig("could not add H4Motion on the companion")
+                        return@added
+                    }
+                    loginThen(gen, admin, ssid, wifiPass, useWifi)
+                }
+            } else {
+                loginThen(gen, admin, ssid, wifiPass, useWifi)
+            }
+        }
+    }
+
     fun stop() {
         wantLink = false
+        cancelConfig()
         stopScan()
         closeGatt()
         if (bondRegistered) {
@@ -467,6 +519,7 @@ class MeshCompanion(
     }
 
     private fun startSession() {
+        cancelConfig()
         synchronized(linkLock) {
             queue.clear()
             inflight = null
@@ -556,23 +609,33 @@ class MeshCompanion(
 
     private fun syncOne() {
         if (syncLeft-- <= 0) {
-            listener.onStatus("live on #sensemb")
+            if (!configBusy) listener.onStatus("live on #sensemb")
             return
         }
         send(byteArrayOf(SYNC_NEXT.toByte()), setOf(CHANNEL_MSG, CHANNEL_MSG_V3, NO_MORE, ERR, 0x07, 0x10)) { frame ->
             val code = frame[0].toInt() and 0xFF
             if (code == NO_MORE || code == ERR) {
-                listener.onStatus("live on #sensemb")
+                if (!configBusy) listener.onStatus("live on #sensemb")
                 return@send
             }
             if (code == CHANNEL_MSG || code == CHANNEL_MSG_V3) deliver(frame)
+            if (code == CONTACT_MSG || code == CONTACT_MSG_V3) deliverContact(frame)
             syncOne()
         }
     }
 
     private fun onFrame(frame: ByteArray) {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            val copy = frame.copyOf()
+            main.post { onFrame(copy) }
+            return
+        }
         if (frame.isEmpty()) return
         val code = frame[0].toInt() and 0xFF
+        if (code == LOGIN_OK || code == LOGIN_FAIL) {
+            handleLoginPush(frame)
+            return
+        }
         if (code == MSG_WAITING) {
             val goNow = synchronized(linkLock) {
                 if (inflight == null) {
@@ -629,6 +692,164 @@ class MeshCompanion(
         if (senseIdx < 0 || idx != senseIdx) return
         val text = channelText(frame) ?: return
         if (text.isNotEmpty()) listener.onChannelText(text)
+    }
+
+    private fun sameConfig(gen: Int): Boolean = wantLink && gen == configGen
+
+    private fun failConfig(text: String) {
+        configGen++
+        configBusy = false
+        cliWaiter = null
+        loginWaiter = null
+        clearTimeout(cliTimeout)
+        clearTimeout(loginTimeout)
+        cliTimeout = null
+        loginTimeout = null
+        listener.onStatus(text)
+    }
+
+    private fun cancelConfig() {
+        configGen++
+        configBusy = false
+        cliWaiter = null
+        loginWaiter = null
+        clearTimeout(cliTimeout)
+        clearTimeout(loginTimeout)
+        cliTimeout = null
+        loginTimeout = null
+    }
+
+    private fun clearTimeout(run: Runnable?) {
+        if (run != null) main.removeCallbacks(run)
+    }
+
+    private fun loginThen(gen: Int, admin: String, ssid: String, wifiPass: String, useWifi: Boolean) {
+        listener.onStatus("logging in to H4Motion")
+        send(loginFrame(admin), setOf(SENT, ERR)) { frame ->
+            if (!sameConfig(gen)) return@send
+            val code = frame[0].toInt() and 0xFF
+            if (code == ERR) {
+                val why = if (frame.size > 1 && (frame[1].toInt() and 0xFF) == 2) {
+                    "sensor is not a companion contact"
+                } else {
+                    "companion rejected login"
+                }
+                failConfig(why)
+                return@send
+            }
+            loginWaiter = done@{ ok ->
+                loginWaiter = null
+                clearTimeout(loginTimeout)
+                loginTimeout = null
+                if (!sameConfig(gen)) return@done
+                if (!ok) {
+                    failConfig("login failed — check the admin password")
+                    return@done
+                }
+                if (ssid.isNotEmpty()) {
+                    listener.onStatus("saving WiFi over LoRa")
+                    sendCli(gen, wifiCommand(ssid, wifiPass)) { reply ->
+                        if (reply.startsWith("wifi bad")) {
+                            failConfig("WiFi credentials rejected")
+                            return@sendCli
+                        }
+                        sendLink(gen, useWifi, 3)
+                    }
+                } else {
+                    sendLink(gen, useWifi, 3)
+                }
+            }
+            val wait = Runnable {
+                if (!sameConfig(gen) || loginWaiter == null) return@Runnable
+                loginWaiter = null
+                failConfig("no login reply — sensor may be out of range")
+            }
+            loginTimeout = wait
+            main.postDelayed(wait, 90_000)
+        }
+    }
+
+    private fun sendLink(gen: Int, useWifi: Boolean, retries: Int) {
+        if (!sameConfig(gen)) return
+        listener.onStatus(if (useWifi) "asking the sensor to use WiFi" else "asking the sensor to use LoRa")
+        val command = if (useWifi) "link wifi" else "link lora"
+        sendCli(gen, command) { reply -> handleLinkReply(gen, useWifi, reply, retries) }
+    }
+
+    private fun handleLinkReply(gen: Int, useWifi: Boolean, reply: String, retries: Int) {
+        if (!sameConfig(gen)) return
+        val ip = IPV4.find(reply)?.value
+        when {
+            reply.startsWith("link lora") -> {
+                configBusy = false
+                listener.onStatus(if (ip != null) "tracks on LoRa, WiFi $ip" else "tracks on LoRa")
+                listener.onLinkMode(false, "")
+            }
+            reply.startsWith("link wifi") && ip != null -> {
+                configBusy = false
+                listener.onStatus("WiFi $ip")
+                listener.onLinkMode(true, ip)
+            }
+            reply.startsWith("link wait") && useWifi && retries > 0 -> {
+                listener.onStatus("WiFi still joining")
+                main.postDelayed({
+                    if (sameConfig(gen)) sendLink(gen, true, retries - 1)
+                }, 8_000)
+            }
+            else -> {
+                configBusy = false
+                listener.onStatus("WiFi failed, tracks stay on LoRa")
+                listener.onLinkMode(false, "")
+            }
+        }
+    }
+
+    private fun sendCli(gen: Int, command: String, onReply: (String) -> Unit) {
+        send(cliFrame(command), setOf(SENT, ERR)) { frame ->
+            if (!sameConfig(gen)) return@send
+            if ((frame[0].toInt() and 0xFF) == ERR) {
+                failConfig("companion rejected the command")
+                return@send
+            }
+            cliWaiter = { text ->
+                cliWaiter = null
+                clearTimeout(cliTimeout)
+                cliTimeout = null
+                if (sameConfig(gen)) onReply(text)
+            }
+            val wait = Runnable {
+                if (!sameConfig(gen) || cliWaiter == null) return@Runnable
+                cliWaiter = null
+                failConfig("no reply from the sensor — it may be out of range")
+            }
+            cliTimeout = wait
+            main.postDelayed(wait, 90_000)
+        }
+    }
+
+    private fun handleLoginPush(frame: ByteArray) {
+        if (frame.size < 8) return
+        val prefix = frame.copyOfRange(2, 8)
+        if (!prefix.contentEquals(SENSOR_PUB.copyOf(6))) return
+        val waiter = loginWaiter ?: return
+        val admin = frame.size > 1 && (frame[1].toInt() and 0xFF) != 0
+        val ok = (frame[0].toInt() and 0xFF) == LOGIN_OK && admin
+        waiter(ok)
+    }
+
+    private fun deliverContact(frame: ByteArray) {
+        val type = frame[0].toInt() and 0xFF
+        val base = if (type == CONTACT_MSG_V3) 4 else 1
+        if (frame.size < base + 12) return
+        val prefix = frame.copyOfRange(base, base + 6)
+        if (!prefix.contentEquals(SENSOR_PUB.copyOf(6))) return
+        val txtType = frame[base + 7].toInt() and 0xFF
+        if (txtType != TXT_CLI) return
+        val text = frame.copyOfRange(base + 12, frame.size)
+            .toString(Charsets.UTF_8)
+            .trim('\u0000', ' ', '\r', '\n')
+        val waiter = cliWaiter ?: return
+        waiter(text)
     }
 
     private fun send(bytes: ByteArray, expect: Set<Int>, onResp: (ByteArray) -> Unit) {
@@ -792,18 +1013,106 @@ class MeshCompanion(
 
         private const val OK = 0x00
         private const val ERR = 0x01
+        private const val RESP_CONTACT = 0x03
         private const val SELF_INFO = 0x05
+        private const val SENT = 0x06
+        private const val CONTACT_MSG = 0x07
         private const val CHANNEL_MSG = 0x08
         private const val NO_MORE = 0x0A
         private const val DEVICE_INFO = 0x0D
+        private const val CONTACT_MSG_V3 = 0x10
         private const val CHANNEL_MSG_V3 = 0x11
         private const val CHANNEL_INFO = 0x12
         private const val MSG_WAITING = 0x83
+        private const val LOGIN_OK = 0x85
+        private const val LOGIN_FAIL = 0x86
         private const val DEVICE_QUERY = 0x16
         private const val SET_TIME = 0x06
         private const val GET_CHANNEL = 0x1F
         private const val SET_CHANNEL = 0x20
         private const val SYNC_NEXT = 0x0A
+        private const val CMD_SEND_TXT = 0x02
+        private const val CMD_ADD_CONTACT = 0x09
+        private const val CMD_SEND_LOGIN = 0x1A
+        private const val CMD_GET_CONTACT = 0x1E
+        private const val TXT_CLI = 1
+        private const val ADV_SENSOR = 4
+        private const val PATH_UNKNOWN = 0xFF
+
+        private val IPV4 = Regex("""\d{1,3}(?:\.\d{1,3}){3}""")
+        private val SENSOR_PUB = hexToBytes(
+            "6516E7C6761DC075110D04A58940F082988D0F309FEF9A29861E30FFCAC33B87"
+        )
+
+        private fun hexToBytes(hex: String): ByteArray {
+            val out = ByteArray(hex.length / 2)
+            var i = 0
+            while (i < out.size) {
+                out[i] = hex.substring(i * 2, i * 2 + 2).toInt(16).toByte()
+                i++
+            }
+            return out
+        }
+
+        private fun credentialProblem(admin: String, ssid: String, wifiPass: String): String? {
+            if (admin.isEmpty() || admin.length > 30 || admin.any { it < ' ' || it == '"' }) {
+                return "admin password is empty or has a quote"
+            }
+            val ssidBytes = ssid.toByteArray(Charsets.UTF_8)
+            val passBytes = wifiPass.toByteArray(Charsets.UTF_8)
+            if (ssidBytes.size > 32 || passBytes.size > 63) return "SSID or password is too long"
+            if (ssid.any { it < ' ' || it == '"' } || wifiPass.any { it < ' ' || it == '"' }) {
+                return "SSID and password cannot contain quotes"
+            }
+            return null
+        }
+
+        private fun quoteArg(value: String): String {
+            if (value.isEmpty() || value.any { it.isWhitespace() }) return "\"$value\""
+            return value
+        }
+
+        private fun wifiCommand(ssid: String, wifiPass: String): String {
+            return "wifi ${quoteArg(ssid)} ${quoteArg(wifiPass)}"
+        }
+
+        private fun getContactFrame(): ByteArray {
+            val frame = ByteArray(1 + SENSOR_PUB.size)
+            frame[0] = CMD_GET_CONTACT.toByte()
+            SENSOR_PUB.copyInto(frame, 1)
+            return frame
+        }
+
+        private fun addContactFrame(): ByteArray {
+            val frame = ByteArray(1 + 32 + 1 + 1 + 1 + 64 + 32 + 4)
+            frame[0] = CMD_ADD_CONTACT.toByte()
+            SENSOR_PUB.copyInto(frame, 1)
+            frame[33] = ADV_SENSOR.toByte()
+            frame[34] = 0
+            frame[35] = PATH_UNKNOWN.toByte()
+            "H4Motion".toByteArray(Charsets.UTF_8).copyInto(frame, 36 + 64)
+            return frame
+        }
+
+        private fun loginFrame(admin: String): ByteArray {
+            val pass = admin.toByteArray(Charsets.UTF_8)
+            val frame = ByteArray(1 + SENSOR_PUB.size + pass.size)
+            frame[0] = CMD_SEND_LOGIN.toByte()
+            SENSOR_PUB.copyInto(frame, 1)
+            pass.copyInto(frame, 1 + SENSOR_PUB.size)
+            return frame
+        }
+
+        private fun cliFrame(command: String): ByteArray {
+            val text = command.toByteArray(Charsets.UTF_8)
+            val frame = ByteArray(13 + text.size)
+            frame[0] = CMD_SEND_TXT.toByte()
+            frame[1] = TXT_CLI.toByte()
+            frame[2] = 0
+            SENSOR_PUB.copyInto(frame, 7, endIndex = 6)
+            text.copyInto(frame, 13)
+            return frame
+        }
 
         fun hashtagSecret(name: String): ByteArray {
             val digest = MessageDigest.getInstance("SHA-256").digest(name.toByteArray(Charsets.UTF_8))

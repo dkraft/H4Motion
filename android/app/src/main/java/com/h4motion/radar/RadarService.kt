@@ -14,6 +14,10 @@ import android.os.IBinder
 import android.os.Looper
 import android.os.SystemClock
 import androidx.core.app.NotificationCompat
+import java.io.BufferedReader
+import java.io.InputStreamReader
+import java.net.InetSocketAddress
+import java.net.Socket
 
 /**
  * Holds the companion link (or the demo) in the foreground so an alert can
@@ -23,6 +27,14 @@ class RadarService : Service(), MeshCompanion.Listener {
     inner class LocalBinder : Binder() {
         fun scan() = startLink()
         fun toggleDemo() = setDemo(!demo)
+        fun applyConfig(admin: String, ssid: String, wifiPass: String, useWifi: Boolean) {
+            setDemo(false)
+            if (!companion.isReady()) {
+                onStatus("scan the companion first")
+                return
+            }
+            companion.configure(admin, ssid, wifiPass, useWifi)
+        }
         fun cycleRange() {
             val next = when (RadarHub.state.rangeM) {
                 4 -> 8
@@ -43,6 +55,10 @@ class RadarService : Service(), MeshCompanion.Listener {
     private var demoNear = false
     private var alertSerial = 10
     private var linkStatus = "idle"
+    private var wifiIp: String? = null
+    private var socketGen = 0
+    private var trackSocket: Socket? = null
+    @Volatile private var socketThread: Thread? = null
 
     override fun onBind(intent: Intent?): IBinder = binder
 
@@ -61,6 +77,7 @@ class RadarService : Service(), MeshCompanion.Listener {
     override fun onDestroy() {
         demo = false
         main.removeCallbacks(demoTick)
+        stopSocket()
         companion.stop()
         super.onDestroy()
     }
@@ -75,6 +92,7 @@ class RadarService : Service(), MeshCompanion.Listener {
         demo = on
         main.removeCallbacks(demoTick)
         if (on) {
+            stopSocket()
             companion.stop()
             demoY = 7000
             demoEntered = false
@@ -110,7 +128,12 @@ class RadarService : Service(), MeshCompanion.Listener {
         }
     }
 
+    override fun onLinkMode(wifi: Boolean, ip: String) {
+        if (wifi && ip.isNotEmpty()) startSocket(ip) else stopSocket()
+    }
+
     override fun onStatus(text: String) {
+        if (wifiIp != null && text.startsWith("live on #sensemb")) return
         linkStatus = text
         if (!demo) {
             RadarHub.update { it.copy(status = text, demo = false) }
@@ -217,6 +240,74 @@ class RadarService : Service(), MeshCompanion.Listener {
                 enableVibration(true)
             }
         )
+    }
+
+    private fun startSocket(ip: String) {
+        stopSocket()
+        val gen = socketGen
+        wifiIp = ip
+        val thread = Thread {
+            var delay = 1000L
+            while (gen == socketGen && !Thread.currentThread().isInterrupted) {
+                var sock: Socket? = null
+                try {
+                    sock = Socket()
+                    sock.connect(InetSocketAddress(ip, 4040), 5000)
+                    sock.keepAlive = true
+                    trackSocket = sock
+                    main.post {
+                        if (gen != socketGen || demo) return@post
+                        linkStatus = "live on WiFi $ip"
+                        RadarHub.update { it.copy(status = linkStatus, demo = false) }
+                        startAsForeground(linkStatus)
+                    }
+                    val reader = BufferedReader(InputStreamReader(sock.getInputStream(), Charsets.UTF_8))
+                    while (gen == socketGen) {
+                        val line = reader.readLine() ?: break
+                        main.post {
+                            if (gen == socketGen && !demo) onChannelText(line)
+                        }
+                    }
+                } catch (_: Exception) {
+                    if (gen != socketGen) break
+                    main.post {
+                        if (gen == socketGen && !demo) {
+                            linkStatus = "WiFi $ip retrying"
+                            RadarHub.update { it.copy(status = linkStatus) }
+                        }
+                    }
+                } finally {
+                    try {
+                        sock?.close()
+                    } catch (_: Exception) {
+                    }
+                    if (trackSocket === sock) trackSocket = null
+                }
+                if (gen != socketGen) break
+                try {
+                    Thread.sleep(delay)
+                } catch (_: InterruptedException) {
+                    break
+                }
+                delay = (delay * 2).coerceAtMost(8000L)
+            }
+        }
+        thread.name = "h4-wifi"
+        socketThread = thread
+        thread.start()
+    }
+
+    private fun stopSocket() {
+        socketGen++
+        wifiIp = null
+        val open = trackSocket
+        trackSocket = null
+        try {
+            open?.close()
+        } catch (_: Exception) {
+        }
+        socketThread?.interrupt()
+        socketThread = null
     }
 
     companion object {

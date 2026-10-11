@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="#06110C">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:fontFamily="monospace"
+            android:text="SSID and password go out as a private admin command. They are not sent on #sensemb. Apply can take a minute or two over LoRa."
+            android:textColor="#B7E7C7"
+            android:textSize="13sp" />
+
+        <EditText
+            android:id="@+id/ssid"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:hint="WiFi SSID"
+            android:importantForAutofill="no"
+            android:inputType="text"
+            android:textColor="#E8FFE8"
+            android:textColorHint="#6E9A7C" />
+
+        <EditText
+            android:id="@+id/wifiPass"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="WiFi password"
+            android:importantForAutofill="no"
+            android:inputType="textPassword"
+            android:textColor="#E8FFE8"
+            android:textColorHint="#6E9A7C" />
+
+        <EditText
+            android:id="@+id/adminPass"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="Sensor admin password"
+            android:importantForAutofill="no"
+            android:inputType="textPassword"
+            android:textColor="#E8FFE8"
+            android:textColorHint="#6E9A7C" />
+
+        <RadioGroup
+            android:id="@+id/linkMode"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp">
+
+            <RadioButton
+                android:id="@+id/modeLora"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Tracks on LoRa"
+                android:textColor="#E8FFE8" />
+
+            <RadioButton
+                android:id="@+id/modeWifi"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:checked="true"
+                android:text="Tracks on WiFi"
+                android:textColor="#E8FFE8" />
+        </RadioGroup>
+
+        <Button
+            android:id="@+id/btnApply"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Apply" />
+
+        <Button
+            android:id="@+id/btnDemoRow"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Demo" />
+    </LinearLayout>
+</ScrollView>

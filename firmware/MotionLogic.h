@@ -46,8 +46,10 @@ public:
   void observe(const RdTarget t[RD03_MAX_TARGETS], uint32_t now_ms);
   void tick(uint32_t now_ms);
   void forceReport();
-  // Copies one outbound line when the airtime gap has elapsed. Alerts go first.
-  bool takeMessage(uint32_t now_ms, char* out, size_t out_len, bool* is_alert);
+  // Copies one outbound line. Alerts go first and always honor the LoRa air gap.
+  // fast_tracks sends RD lines about 10 times a second and does not spend that
+  // air gap, for a local socket. The default keeps the mesh pacing.
+  bool takeMessage(uint32_t now_ms, char* out, size_t out_len, bool* is_alert, bool fast_tracks = false);
 
   void setNearMm(int mm);
   void setTrackSecs(int secs);

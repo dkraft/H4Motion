@@ -37,9 +37,11 @@ void Rd03d::begin() {
   _serial.begin(RD03_BAUD, SERIAL_8N1, RD03_RX_PIN, RD03_TX_PIN);
   _got = 0;
   _fresh = false;
-  _mode_left = 3;
+  _rx = 0;
+  _tail_n = 0;
   _next_mode_ms = millis() + 400;
   memset(_tgt, 0, sizeof(_tgt));
+  memset(_tail, 0, sizeof(_tail));
 }
 
 void Rd03d::sendMultiTarget() {
@@ -65,15 +67,32 @@ void Rd03d::push(uint8_t b) {
   _got = 0;
 }
 
+int Rd03d::lastBytes(uint8_t* out, int max_n) const {
+  int n = _tail_n < 8 ? _tail_n : 8;
+  if (n > max_n) n = max_n;
+  // _tail is a ring once 8 bytes have arrived. The newest byte sits just behind _tail_n.
+  int start = (_tail_n < 8) ? 0 : (int)(_tail_n % 8);
+  for (int i = 0; i < n; i++) {
+    int idx = (_tail_n < 8) ? i : (start + i) % 8;
+    out[i] = _tail[idx];
+  }
+  return n;
+}
+
 void Rd03d::loop() {
   uint32_t now = millis();
-  if (_mode_left && (int32_t)(now - _next_mode_ms) >= 0) {
+  // The module boots in single-target mode and ignores a command that arrives before it is up.
+  // Keep asking until a multi-target frame is actually parsed.
+  if (_ok == 0 && (int32_t)(now - _next_mode_ms) >= 0) {
     sendMultiTarget();
-    _mode_left--;
-    _next_mode_ms = now + 500;
+    _next_mode_ms = now + 1000;
   }
   while (_serial.available() > 0) {
-    push((uint8_t)_serial.read());
+    uint8_t b = (uint8_t)_serial.read();
+    _rx++;
+    _tail[_tail_n % 8] = b;
+    _tail_n++;
+    push(b);
   }
 }
 
