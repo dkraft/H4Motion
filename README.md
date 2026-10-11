@@ -120,9 +120,9 @@ The user button queues `rd report`. This board has no screen. The phone is the s
 
 The phone scope is a 120° wedge, the forward field of the RD-03D. The sensor is at the bottom, up is +Y, and right is +X. A return outside that wedge is drawn on the nearest edge. Closing targets are amber. Inside 2.5 m they are red.
 
-Under the wedge, amber plates show the track path (LoRa or WiFi), the first ENTER, the latest ENTER, and the live T1 contact. The first ENTER stays for the session. The latest one moves on every new ENTER. T1 follows the contact and reads NEAR inside 2.5 m.
+Under the wedge, amber plates show the track path (LoRa or WiFi), the first ENTER, the latest ENTER, and the closest contact. The first ENTER stays for the session. The latest one moves on every new ENTER. The contact plate follows whichever return is nearest and reads NEAR inside 2.5 m. LAT is how old that picture is. On WiFi the sensor sends the latest position 3 times a second, and the phone paints at that same pace instead of replaying a burst.
 
-`make test` checks the RD-03D frame and the occupancy machine on the host. `make build` produces the Heltec image. The debug APK is `android/app/build/outputs/apk/debug/app-debug.apk` after `assembleDebug` (JDK 17, compile SDK 34). Version 0.1.4 is that deck under the sector scope, with admin password `123456` and default WiFi `BPSSI`.
+`make test` checks the RD-03D frame and the occupancy machine on the host. `make build` produces the Heltec image. The debug APK is `android/app/build/outputs/apk/debug/app-debug.apk` after `assembleDebug` (JDK 17, compile SDK 34). Version 0.1.5 is that closest-contact deck, with admin password `123456` and default WiFi `BPSSI`.
 
 ## Layout
 

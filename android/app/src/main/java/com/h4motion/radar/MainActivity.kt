@@ -187,7 +187,14 @@ class MainActivity : AppCompatActivity() {
         val alertLive = state.alert != null && SystemClock.elapsedRealtime() < state.alertUntilMs
         banner.visibility = if (alertLive) View.VISIBLE else View.GONE
         banner.text = state.alert ?: ""
-        deck.bind(state.linkWifi, state.firstEnter, state.lastEnter, state.blips, state.rangeM)
+        deck.bind(
+            state.linkWifi,
+            state.firstEnter,
+            state.lastEnter,
+            state.blips,
+            state.rangeM,
+            state.sampleElapsedMs
+        )
     }
 
     private fun permissionsReady(): Boolean {

@@ -259,7 +259,8 @@ void setup() {
 #endif
 
 #ifdef DISPLAY_CLASS
-  if (display.begin()) {
+  bool display_ok = display.begin();
+  if (display_ok) {
     display.startFrame();
     display.print("H4Motion...");
     display.endFrame();
@@ -298,7 +299,7 @@ void setup() {
   the_mesh.begin(fs);
 
 #ifdef DISPLAY_CLASS
-  ui_task.begin(the_mesh.getNodePrefs(), FIRMWARE_BUILD_DATE, FIRMWARE_VERSION);
+  ui_task.begin(the_mesh.getNodePrefs(), FIRMWARE_BUILD_DATE, FIRMWARE_VERSION, display_ok);
 #endif
 
   motion.begin(millis());

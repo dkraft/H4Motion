@@ -20,7 +20,9 @@ object RadarHub {
         val demo: Boolean = false,
         val linkWifi: Boolean = false,
         val firstEnter: EnterMark? = null,
-        val lastEnter: EnterMark? = null
+        val lastEnter: EnterMark? = null,
+        /** elapsedRealtime when the picture now on screen was applied. */
+        val sampleElapsedMs: Long = 0L
     )
 
     @Volatile
@@ -45,8 +47,12 @@ object RadarHub {
     }
 
     private fun publish(next: State) {
-        main.post {
+        if (Looper.myLooper() == Looper.getMainLooper()) {
             for (listener in listeners) listener(next)
+        } else {
+            main.post {
+                for (listener in listeners) listener(next)
+            }
         }
     }
 

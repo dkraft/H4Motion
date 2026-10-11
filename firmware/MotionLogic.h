@@ -47,8 +47,8 @@ public:
   void tick(uint32_t now_ms);
   void forceReport();
   // Copies one outbound line. Alerts go first and always honor the LoRa air gap.
-  // fast_tracks sends RD lines about 10 times a second and does not spend that
-  // air gap, for a local socket. The default keeps the mesh pacing.
+  // fast_tracks sends the latest RD line about 3 times a second and does not
+  // spend that air gap, for a local socket. The default keeps the mesh pacing.
   bool takeMessage(uint32_t now_ms, char* out, size_t out_len, bool* is_alert, bool fast_tracks = false);
 
   void setNearMm(int mm);

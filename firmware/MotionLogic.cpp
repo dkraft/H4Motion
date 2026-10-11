@@ -5,7 +5,9 @@
 #include <string.h>
 
 static const uint32_t kAirGapMs = 800;
-static const uint32_t kFastTrackMs = 100;
+// Three fresh positions a second. Ten a second clumped on WiFi and the phone
+// then painted the backlog, which is the lag.
+static const uint32_t kFastTrackMs = 333;
 static const uint32_t kLeaveMs = 1500;
 static const uint32_t kBannerMs = 4000;
 

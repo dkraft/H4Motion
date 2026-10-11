@@ -12,16 +12,19 @@
 #define RD03_RANGE_MM 8000
 #endif
 
-void UITask::begin(NodePrefs* node_prefs, const char* build_date, const char* firmware_version) {
+void UITask::begin(NodePrefs* node_prefs, const char* build_date, const char* firmware_version, bool panel) {
   (void)build_date;
   (void)firmware_version;
   _prevBtnState = HIGH;
   _press_latched = false;
   _node_prefs = node_prefs;
+  _panel = panel;
 #ifdef PIN_USER_BTN
   pinMode(PIN_USER_BTN, INPUT_PULLUP);
 #endif
-  _display->turnOn();
+  // A missing panel still reports itself on, then endFrame() blocks on I2C.
+  // That stall is in the same loop that sends tracks.
+  if (_panel) _display->turnOn();
 }
 
 void UITask::setSnapshot(const MotionSnapshot& snap, const char* channel_name, uint32_t frames_ok, const char* link_tag) {
@@ -125,7 +128,7 @@ void UITask::loop() {
     _next_read = millis() + 50;
   }
 #endif
-  if (_display->isOn() && millis() >= _next_refresh) {
+  if (_panel && _display->isOn() && millis() >= _next_refresh) {
     _display->startFrame();
     renderCurrScreen();
     _display->endFrame();

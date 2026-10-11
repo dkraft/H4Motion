@@ -59,6 +59,13 @@ class RadarService : Service(), MeshCompanion.Listener {
     private var socketGen = 0
     private var trackSocket: Socket? = null
     @Volatile private var socketThread: Thread? = null
+    private val trackLock = Any()
+    private var pendingTrack: String? = null
+    private var pendingGen = -1
+    private var pendingPicture = 0
+    private var pictureGen = 0
+    private var kickPosted = false
+    private var lastTrackApplyMs = 0L
 
     override fun onBind(intent: Intent?): IBinder = binder
 
@@ -77,6 +84,8 @@ class RadarService : Service(), MeshCompanion.Listener {
     override fun onDestroy() {
         demo = false
         main.removeCallbacks(demoTick)
+        main.removeCallbacks(trackKick)
+        main.removeCallbacks(trackDelayed)
         stopSocket()
         companion.stop()
         super.onDestroy()
@@ -147,6 +156,80 @@ class RadarService : Service(), MeshCompanion.Listener {
     }
 
     override fun onChannelText(text: String) {
+        if (SenseParser.isAlertLine(text)) {
+            applyText(text)
+            return
+        }
+        // WiFi tracks arrive on the socket. A late LoRa copy would fight that stream.
+        if (wifiIp != null) return
+        offerTrack(text, -1)
+    }
+
+    /**
+     * Keep the newest track line and paint at most three times a second.
+     * A WiFi clump used to replay every stale position and the scope lagged behind.
+     * gen >= 0 is a socket generation; -1 is LoRa or demo.
+     */
+    private fun offerTrack(line: String, gen: Int) {
+        synchronized(trackLock) {
+            pendingTrack = line
+            pendingGen = gen
+            pendingPicture = pictureGen
+        }
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            drainTracks()
+            return
+        }
+        val post = synchronized(trackLock) {
+            if (kickPosted) {
+                false
+            } else {
+                kickPosted = true
+                true
+            }
+        }
+        if (post) main.post(trackKick)
+    }
+
+    private val trackKick = Runnable {
+        synchronized(trackLock) { kickPosted = false }
+        drainTracks()
+    }
+
+    private val trackDelayed = Runnable { drainTracks() }
+
+    private fun drainTracks() {
+        val now = SystemClock.elapsedRealtime()
+        if (lastTrackApplyMs != 0L) {
+            val wait = TRACK_PERIOD_MS - (now - lastTrackApplyMs)
+            if (wait > 0L) {
+                main.removeCallbacks(trackDelayed)
+                main.postDelayed(trackDelayed, wait)
+                return
+            }
+        }
+        val line: String
+        val gen: Int
+        synchronized(trackLock) {
+            if (pendingTrack == null || pendingPicture != pictureGen) {
+                pendingTrack = null
+                return
+            }
+            line = pendingTrack ?: return
+            gen = pendingGen
+            pendingTrack = null
+        }
+        if (demo || (gen >= 0 && gen != socketGen)) return
+        lastTrackApplyMs = SystemClock.elapsedRealtime()
+        applyText(line)
+    }
+
+    private fun applyText(text: String) {
+        val seen = SystemClock.elapsedRealtime()
+        if (SenseParser.isAlertLine(text)) {
+            // A track already waiting is older than this alert. Do not paint it afterwards.
+            synchronized(trackLock) { pictureGen++ }
+        }
         when (val event = SenseParser.parse(text)) {
             is SenseParser.Event.Tracks -> {
                 val clear = event.count == 0 || event.state == "CLEAR" || event.state == "LEAVE"
@@ -155,7 +238,7 @@ class RadarService : Service(), MeshCompanion.Listener {
                 } else {
                     event.targets.mapIndexed { i, t -> RadarHub.Blip(t.xMm, t.yMm, t.spdCms, i) }
                 }
-                RadarHub.update { it.copy(blips = blips) }
+                RadarHub.update { it.copy(blips = blips, sampleElapsedMs = seen) }
             }
             is SenseParser.Event.Alert -> {
                 val banner = formatAlert(event)
@@ -174,9 +257,10 @@ class RadarService : Service(), MeshCompanion.Listener {
                     it.copy(
                         blips = blips,
                         alert = banner,
-                        alertUntilMs = SystemClock.elapsedRealtime() + 8000L,
+                        alertUntilMs = seen + 8000L,
                         firstEnter = if (entered != null) it.firstEnter ?: entered else it.firstEnter,
-                        lastEnter = entered ?: it.lastEnter
+                        lastEnter = entered ?: it.lastEnter,
+                        sampleElapsedMs = seen
                     )
                 }
                 postAlert(event.kind, banner)
@@ -265,6 +349,7 @@ class RadarService : Service(), MeshCompanion.Listener {
                     sock = Socket()
                     sock.connect(InetSocketAddress(ip, 4040), 5000)
                     sock.keepAlive = true
+                    sock.tcpNoDelay = true
                     trackSocket = sock
                     main.post {
                         if (gen != socketGen || demo) return@post
@@ -275,8 +360,12 @@ class RadarService : Service(), MeshCompanion.Listener {
                     val reader = BufferedReader(InputStreamReader(sock.getInputStream(), Charsets.UTF_8))
                     while (gen == socketGen) {
                         val line = reader.readLine() ?: break
-                        main.post {
-                            if (gen == socketGen && !demo) onChannelText(line)
+                        if (SenseParser.isAlertLine(line)) {
+                            main.post {
+                                if (gen == socketGen && !demo) applyText(line)
+                            }
+                        } else {
+                            offerTrack(line, gen)
                         }
                     }
                 } catch (_: Exception) {
@@ -325,5 +414,6 @@ class RadarService : Service(), MeshCompanion.Listener {
         private const val ONGOING_ID = 1
         private const val CHANNEL_LINK = "h4motion_link"
         private const val CHANNEL_ALERT = "h4motion_alert"
+        private const val TRACK_PERIOD_MS = 333L
     }
 }

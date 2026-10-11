@@ -140,7 +140,9 @@ static bool writeNow(WiFiClient& c, const uint8_t* buf, size_t n) {
       off += (size_t)res;
       continue;
     }
-    // A torn line would glue to the next one. Drop the client.
+    // Nothing left the buffer. Keep the client; the next sample is in 333 ms.
+    // A torn line would glue to the next one, so that client has to go.
+    if (res < 0 && off == 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) return false;
     c.stop();
     return false;
   }

@@ -131,13 +131,6 @@ class RadarView @JvmOverloads constructor(
                 else -> Color.parseColor("#7DFFB3")
             }
             canvas.drawCircle(sx, sy, 10f, blipPaint)
-            val label = "T${blip.slot + 1}"
-            val labelW = textPaint.measureText(label)
-            var lx = sx + 12f
-            if (lx + labelW > width - 4f) lx = sx - 12f - labelW
-            var ly = sy - 8f
-            if (ly < textPaint.textSize) ly = sy + textPaint.textSize
-            canvas.drawText(label, lx, ly, textPaint)
         }
 
         canvas.drawCircle(cx, cy, 5f, sensorPaint)

@@ -30,6 +30,8 @@ object SenseParser {
         """^AL\s+(ENTER|LEAVE|NEAR)\s+d=(-?\d+(?:\.\d+)?)\s+az=(-?\d+)\s+x=(-?\d+)\s+y=(-?\d+)\s+s=(-?\d+)\s*$"""
     )
 
+    fun isAlertLine(raw: String): Boolean = stripPrefix(raw).startsWith("AL ")
+
     fun parse(raw: String): Event? {
         val text = stripPrefix(raw)
         rd.matchEntire(text)?.let { m ->

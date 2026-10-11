@@ -6,6 +6,7 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.Typeface
+import android.os.SystemClock
 import android.util.AttributeSet
 import android.view.View
 import java.time.Instant
@@ -17,7 +18,7 @@ import kotlin.math.hypot
 
 /**
  * Amber instrument plates under the scope.
- * Link mode, the first ENTER, the latest ENTER, and the live T1 contact.
+ * Link mode, the first ENTER, the latest ENTER, and the closest contact.
  */
 class InstrumentDeck @JvmOverloads constructor(
     context: Context,
@@ -74,22 +75,50 @@ class InstrumentDeck @JvmOverloads constructor(
     private var lastEnter: RadarHub.EnterMark? = null
     private var blips: List<RadarHub.Blip> = emptyList()
     private var rangeM: Int = 8
+    private var sampleElapsedMs: Long = 0L
+    private val ageTick = object : Runnable {
+        override fun run() {
+            if (!isAttachedToWindow || windowVisibility != VISIBLE) return
+            if (sampleElapsedMs != 0L) invalidate()
+            postDelayed(this, 100L)
+        }
+    }
 
     fun bind(
         linkWifi: Boolean,
         firstEnter: RadarHub.EnterMark?,
         lastEnter: RadarHub.EnterMark?,
         blips: List<RadarHub.Blip>,
-        rangeM: Int
+        rangeM: Int,
+        sampleElapsedMs: Long
     ) {
-        val relayout = extraCount() != extrasOf(blips)
         this.linkWifi = linkWifi
         this.firstEnter = firstEnter
         this.lastEnter = lastEnter
         this.blips = blips
         this.rangeM = rangeM.coerceAtLeast(1)
-        if (relayout) requestLayout()
+        this.sampleElapsedMs = sampleElapsedMs
         invalidate()
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        startAgeTick()
+    }
+
+    override fun onDetachedFromWindow() {
+        removeCallbacks(ageTick)
+        super.onDetachedFromWindow()
+    }
+
+    override fun onWindowVisibilityChanged(visibility: Int) {
+        super.onWindowVisibilityChanged(visibility)
+        if (visibility == VISIBLE) startAgeTick() else removeCallbacks(ageTick)
+    }
+
+    private fun startAgeTick() {
+        removeCallbacks(ageTick)
+        postDelayed(ageTick, 100L)
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
@@ -187,13 +216,15 @@ class InstrumentDeck @JvmOverloads constructor(
     }
 
     private fun drawTarget(canvas: Canvas, rect: RectF) {
-        val primary = blips.firstOrNull { it.slot == 0 } ?: blips.firstOrNull()
+        val primary = closestBlip()
         plate(canvas, rect, hot = primary != null)
         clipped(canvas, rect) {
             fieldTitle(canvas, rect, "T1")
+            val numX = rect.left + dp(8f)
             if (primary == null) {
                 dimPaint.textSize = dp(14f)
-                canvas.drawText("NO CONTACT", rect.left + dp(8f), rect.top + dp(78f), dimPaint)
+                canvas.drawText("NO CONTACT", numX, rect.top + dp(78f), dimPaint)
+                drawLatency(canvas, numX, rect.top + dp(122f))
                 drawTape(canvas, rect, null, Color.parseColor("#6E5430"))
                 return@clipped
             }
@@ -218,7 +249,6 @@ class InstrumentDeck @JvmOverloads constructor(
 
             valuePaint.color = tone
             val num = String.format(Locale.US, "%.1f", meters)
-            val numX = rect.left + dp(8f)
             val heroY = rect.top + dp(54f)
             valuePaint.textSize = dp(30f)
             val heroW = valuePaint.measureText(num)
@@ -231,27 +261,43 @@ class InstrumentDeck @JvmOverloads constructor(
             canvas.drawText("AZ $az°", numX, rect.top + dp(80f), valuePaint)
             val spd = if (primary.spdCms > 0) "+${primary.spdCms}" else primary.spdCms.toString()
             canvas.drawText("$spd cm/s", numX, rect.top + dp(100f), valuePaint)
-
-            val rest = blips.filter { it.slot != primary.slot }.take(2)
-            dimPaint.textSize = dp(11f)
-            val step = dp(14f)
-            val room = rect.right - numX - dp(8f)
-            var y = rect.bottom - dp(34f) - (rest.size - 1).coerceAtLeast(0) * step
-            for (blip in rest) {
-                val d = hypot(blip.xMm.toDouble(), blip.yMm.toDouble()) / 1000.0
-                val baz = Math.toDegrees(atan2(blip.xMm.toDouble(), blip.yMm.toDouble())).toInt()
-                val full = String.format(Locale.US, "T%d  %.1f m  AZ %d°  %+d", blip.slot + 1, d, baz, blip.spdCms)
-                val text = if (dimPaint.measureText(full) <= room) {
-                    full
-                } else {
-                    String.format(Locale.US, "T%d  %.1f m  AZ %d°", blip.slot + 1, d, baz)
-                }
-                canvas.drawText(text, numX, y, dimPaint)
-                y += step
-            }
+            drawLatency(canvas, numX, rect.top + dp(122f))
             drawTape(canvas, rect, meters, tone)
         }
         valuePaint.color = amber
+    }
+
+    /** Age of the picture on screen. A steady link sawtooths up to about 333 ms. */
+    private fun drawLatency(canvas: Canvas, x: Float, baseline: Float) {
+        val age = if (sampleElapsedMs == 0L) {
+            -1L
+        } else {
+            (SystemClock.elapsedRealtime() - sampleElapsedMs).coerceAtLeast(0L)
+        }
+        val text = when {
+            age < 0L -> "LAT --"
+            age >= 10000L -> "LAT 10s+"
+            age >= 1000L -> String.format(Locale.US, "LAT %.1fs", age / 1000.0)
+            else -> String.format(Locale.US, "LAT %d ms", age)
+        }
+        val paint = if (age >= 1000L) valuePaint else dimPaint
+        if (age >= 1000L) valuePaint.color = nearRed
+        paint.textSize = dp(12f)
+        canvas.drawText(text, x, baseline, paint)
+        if (age >= 1000L) valuePaint.color = amber
+    }
+
+    private fun closestBlip(): RadarHub.Blip? {
+        var best: RadarHub.Blip? = null
+        var bestD = Long.MAX_VALUE
+        for (blip in blips) {
+            val d = blip.xMm.toLong() * blip.xMm + blip.yMm.toLong() * blip.yMm
+            if (d < bestD) {
+                bestD = d
+                best = blip
+            }
+        }
+        return best
     }
 
     private fun drawTape(canvas: Canvas, rect: RectF, meters: Float?, tone: Int) {
@@ -330,13 +376,7 @@ class InstrumentDeck @JvmOverloads constructor(
 
     private fun enterH(): Float = dp(74f)
 
-    private fun bodyH(): Float = enterH() * 2f + gap() + extraCount() * dp(16f)
-
-    private fun extraCount(): Int = extrasOf(blips)
-
-    private fun extrasOf(items: List<RadarHub.Blip>): Int {
-        return (items.size - if (items.isEmpty()) 0 else 1).coerceIn(0, 2)
-    }
+    private fun bodyH(): Float = enterH() * 2f + gap()
 
     private fun dp(value: Float): Float = value * resources.displayMetrics.density
 }

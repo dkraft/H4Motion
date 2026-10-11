@@ -221,15 +221,16 @@ static void testFastTracks() {
   logic.begin(0);
   feed(logic, 100, 0, 6000, -16);
   feed(logic, 200, 0, 6000, -16);
-  check(takeFast(logic, 200, buf, &alert) && !alert && strncmp(buf, "RD ", 3) == 0,
+  check(!takeFast(logic, 200, buf, &alert), "fast track holds the 333 ms pace");
+  check(takeFast(logic, 400, buf, &alert) && !alert && strncmp(buf, "RD ", 3) == 0,
         "fast track can update while an alert waits for LoRa");
   check(takeFast(logic, 800, buf, &alert) && alert &&
             strcmp(buf, "AL ENTER d=6.0 az=0 x=0 y=6000 s=-16") == 0,
         buf);
-  check(!takeFast(logic, 850, buf, &alert), "fast track waits 100 ms");
-  check(takeFast(logic, 900, buf, &alert) && !alert && strncmp(buf, "RD ", 3) == 0,
+  check(!takeFast(logic, 1000, buf, &alert), "fast track waits 333 ms");
+  check(takeFast(logic, 1133, buf, &alert) && !alert && strncmp(buf, "RD ", 3) == 0,
         "fast track does not wait out the LoRa air gap");
-  check(!takeFast(logic, 950, buf, &alert), "second fast track still waits 100 ms");
+  check(!takeFast(logic, 1233, buf, &alert), "second fast track still waits 333 ms");
 }
 
 static void testWifiArgs() {
