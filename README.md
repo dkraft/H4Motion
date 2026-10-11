@@ -103,7 +103,7 @@ The USB console accepts a command ended by Enter or Return. Serial and mesh admi
 | `link lora` | flood tracks on `#sensemb`. WiFi stays associated |
 | `link wifi` | send tracks on TCP port 4040 once the join succeeds. Alerts still flood |
 
-The passphrase is stored on the sensor and is not sent on `#sensemb`. A failed join leaves tracks on LoRa. The built-in network is `BPSSI`.
+The passphrase is stored on the sensor and is not sent on `#sensemb`. A failed join does not switch the sensor back to LoRa. The next `link wifi` tries again. Tracks stay on LoRa until the join succeeds. The built-in network is `BPSSI`.
 
 The user button queues `rd report`. This board has no screen. The phone is the scope.
 
@@ -113,16 +113,16 @@ The user button queues `rd report`. This board has no screen. The phone is the s
 
 1. Allow Bluetooth and notifications, then tap **Scan**. The service does not start until those are granted.
 2. When Android asks, enter the companion's BLE PIN. The companion UART requires an encrypted bond. Being nearby is not enough, and this app is not the sensor.
-3. The app finds the companion Nordic UART service, joins `#sensemb` if a channel slot is free, and draws tracks.
+3. The app finds the companion Nordic UART service, joins `#sensemb` if a channel slot is free, and draws tracks. If WiFi is the saved choice, Scan asks the sensor which link it is on and opens that socket when the sensor already has an address. Otherwise it sends the saved network.
 4. **ENTER** and **NEAR** post a high-priority notification. The service stays in the foreground so that still happens with the screen covered.
 5. **Config** replaces Demo on the main row. It is filled in with WiFi `BPSSI`, the sensor admin password `123456`, and tracks on WiFi. **Demo** is inside that screen and walks a fake target without a radio. **4 m / 8 m / 16 m** changes the ring scale.
 6. Apply logs into the sensor through the companion and sends `wifi` then `link`. That is a private CLI reply, so it can take a minute or two. The phone must be on the same LAN as the sensor. Tracks then arrive on TCP port 4040. **ENTER** and **NEAR** still arrive on `#sensemb`. Switching back to LoRa keeps the sensor on WiFi so the next switch is only a command.
 
 The phone scope is a 120° wedge, the forward field of the RD-03D. The sensor is at the bottom, up is +Y, and right is +X. A return outside that wedge is drawn on the nearest edge. Closing targets are amber. Inside 2.5 m they are red.
 
-Under the wedge, amber plates show the track path (LoRa or WiFi), the first ENTER, the latest ENTER, and the closest contact. The first ENTER stays for the session. The latest one moves on every new ENTER. The contact plate follows whichever return is nearest and reads NEAR inside 2.5 m. LAT is how old that picture is. On WiFi the sensor sends the latest position 3 times a second, and the phone paints at that same pace instead of replaying a burst.
+Under the wedge, amber plates show the track path (LoRa or WiFi), the first entry, the latest entry, and the closest contact. The first plate locks for the session. It fills on ENTER, on NEAR (a person who appears already inside 2.5 m), and on the first contact already in view. The latest plate moves on each later ENTER or NEAR. The contact plate follows whichever return is nearest and reads NEAR inside 2.5 m. LAT is how old that picture is. On WiFi the sensor sends the latest position 3 times a second, and the phone paints at that same pace instead of replaying a burst.
 
-`make test` checks the RD-03D frame and the occupancy machine on the host. `make build` produces the Heltec image. The debug APK is `android/app/build/outputs/apk/debug/app-debug.apk` after `assembleDebug` (JDK 17, compile SDK 34). Version 0.1.5 is that closest-contact deck, with admin password `123456` and default WiFi `BPSSI`.
+`make test` checks the RD-03D frame and the occupancy machine on the host. `make build` produces the Heltec image. The debug APK is `android/app/build/outputs/apk/debug/app-debug.apk` after `assembleDebug` (JDK 17, compile SDK 34). Version 0.1.6 fills those entry plates and brings WiFi tracks back after Scan. Admin password `123456`. Default WiFi `BPSSI`.
 
 ## Layout
 

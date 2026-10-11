@@ -18,6 +18,8 @@ import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.net.InetSocketAddress
 import java.net.Socket
+import kotlin.math.atan2
+import kotlin.math.hypot
 
 /**
  * Holds the companion link (or the demo) in the foreground so an alert can
@@ -152,7 +154,21 @@ class RadarService : Service(), MeshCompanion.Listener {
             RadarHub.update { it.copy(status = text, demo = false) }
             val ongoing = if (text.startsWith("live")) "listening on #sensemb" else text
             startAsForeground(ongoing)
+            if (text.startsWith("live on #sensemb")) resumeWifi()
         }
+    }
+
+    /** Saved Config choice. A missing preference means WiFi, same as the dialog. */
+    private fun resumeWifi() {
+        val prefs = getSharedPreferences("h4motion", MODE_PRIVATE)
+        val want = if (prefs.contains("use_wifi")) prefs.getBoolean("use_wifi", true) else true
+        if (!want) return
+        val storedSsid = prefs.getString("ssid", null)
+        val storedAdmin = prefs.getString("admin", null)
+        val ssid = if (storedSsid.isNullOrBlank()) "BPSSI" else storedSsid
+        val pass = if (storedSsid.isNullOrBlank()) "KoalaBear" else prefs.getString("wifi_pass", "").orEmpty()
+        val admin = if (storedAdmin.isNullOrBlank() || storedAdmin == "password") "123456" else storedAdmin
+        companion.resumeTracks(admin, ssid, pass)
     }
 
     override fun onChannelText(text: String) {
@@ -238,7 +254,21 @@ class RadarService : Service(), MeshCompanion.Listener {
                 } else {
                     event.targets.mapIndexed { i, t -> RadarHub.Blip(t.xMm, t.yMm, t.spdCms, i) }
                 }
-                RadarHub.update { it.copy(blips = blips, sampleElapsedMs = seen) }
+                RadarHub.update {
+                    // A person already in view never sends ENTER. Stamp once from
+                    // the closest return so the plates leave STANDBY.
+                    val stamp = if (it.firstEnter == null && blips.isNotEmpty()) {
+                        enterMark(blips, System.currentTimeMillis())
+                    } else {
+                        null
+                    }
+                    it.copy(
+                        blips = blips,
+                        sampleElapsedMs = seen,
+                        firstEnter = it.firstEnter ?: stamp,
+                        lastEnter = it.lastEnter ?: stamp
+                    )
+                }
             }
             is SenseParser.Event.Alert -> {
                 val banner = formatAlert(event)
@@ -248,7 +278,8 @@ class RadarService : Service(), MeshCompanion.Listener {
                     listOf(RadarHub.Blip(event.xMm, event.yMm, event.spdCms, 0)) +
                         RadarHub.state.blips.filter { it.slot != 0 }
                 }
-                val entered = if (event.kind == "ENTER") {
+                // Inside 2.5 m the sensor sends NEAR and no ENTER. That is still an entry.
+                val entered = if (event.kind == "ENTER" || event.kind == "NEAR") {
                     RadarHub.EnterMark(System.currentTimeMillis(), event.meters, event.azimuthDeg)
                 } else {
                     null
@@ -267,6 +298,23 @@ class RadarService : Service(), MeshCompanion.Listener {
             }
             null -> Unit
         }
+    }
+
+    private fun enterMark(blips: List<RadarHub.Blip>, atMs: Long): RadarHub.EnterMark? {
+        var best: RadarHub.Blip? = null
+        var bestD = Long.MAX_VALUE
+        for (blip in blips) {
+            val d = blip.xMm.toLong() * blip.xMm + blip.yMm.toLong() * blip.yMm
+            if (d < bestD) {
+                bestD = d
+                best = blip
+            }
+        }
+        val primary = best ?: return null
+        val meters = hypot(primary.xMm.toDouble(), primary.yMm.toDouble()).toFloat() / 1000f
+        val az = Math.toDegrees(atan2(primary.xMm.toDouble(), primary.yMm.toDouble()))
+        val azInt = if (az >= 0.0) (az + 0.5).toInt() else (az - 0.5).toInt()
+        return RadarHub.EnterMark(atMs, meters, azInt)
     }
 
     private fun formatAlert(event: SenseParser.Event.Alert): String {

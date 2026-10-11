@@ -69,6 +69,7 @@ class MeshCompanion(
     private var notifyTries = 0
     private var configGen = 0
     private var configBusy = false
+    private var resumeUsed = false
     private var cliWaiter: ((String) -> Unit)? = null
     private var loginWaiter: ((Boolean) -> Unit)? = null
     private var cliTimeout: Runnable? = null
@@ -86,6 +87,8 @@ class MeshCompanion(
     private val linkLock = Any()
 
     fun scan() {
+        resumeUsed = false
+        cancelConfig()
         val bt = adapter
         if (bt == null || !bt.isEnabled) {
             listener.onStatus("Bluetooth is off")
@@ -134,10 +137,40 @@ class MeshCompanion(
             listener.onStatus(problem)
             return
         }
+        startAdmin(admin, ssid, wifiPass, useWifi, queryOnly = false)
+    }
+
+    /**
+     * One try per Scan. Asks `link` before sending credentials, so a sensor
+     * that is already on WiFi is not bounced off the access point. If tracks
+     * are still on LoRa, the saved network is sent and then `link wifi`.
+     */
+    fun resumeTracks(admin: String, ssid: String, wifiPass: String) {
+        if (resumeUsed || configBusy || !isReady()) return
+        resumeUsed = true
+        if (mtu < 180) {
+            listener.onStatus("BLE MTU $mtu is too small for sensor setup")
+            return
+        }
+        val problem = credentialProblem(admin, ssid, wifiPass)
+        if (problem != null) {
+            listener.onStatus(problem)
+            return
+        }
+        startAdmin(admin, ssid, wifiPass, useWifi = true, queryOnly = true)
+    }
+
+    private fun startAdmin(
+        admin: String,
+        ssid: String,
+        wifiPass: String,
+        useWifi: Boolean,
+        queryOnly: Boolean
+    ) {
         cancelConfig()
         val gen = configGen
         configBusy = true
-        listener.onStatus("checking sensor contact")
+        listener.onStatus(if (queryOnly) "checking the sensor link" else "checking sensor contact")
         send(getContactFrame(), setOf(RESP_CONTACT, ERR)) got@{ frame ->
             if (!sameConfig(gen)) return@got
             val code = frame[0].toInt() and 0xFF
@@ -149,10 +182,10 @@ class MeshCompanion(
                         failConfig("could not add H4Motion on the companion")
                         return@added
                     }
-                    loginThen(gen, admin, ssid, wifiPass, useWifi)
+                    loginThen(gen, admin, ssid, wifiPass, useWifi, queryOnly)
                 }
             } else {
-                loginThen(gen, admin, ssid, wifiPass, useWifi)
+                loginThen(gen, admin, ssid, wifiPass, useWifi, queryOnly)
             }
         }
     }
@@ -723,7 +756,14 @@ class MeshCompanion(
         if (run != null) main.removeCallbacks(run)
     }
 
-    private fun loginThen(gen: Int, admin: String, ssid: String, wifiPass: String, useWifi: Boolean) {
+    private fun loginThen(
+        gen: Int,
+        admin: String,
+        ssid: String,
+        wifiPass: String,
+        useWifi: Boolean,
+        queryOnly: Boolean
+    ) {
         listener.onStatus("logging in to H4Motion")
         send(loginFrame(admin), setOf(SENT, ERR)) { frame ->
             if (!sameConfig(gen)) return@send
@@ -746,6 +786,13 @@ class MeshCompanion(
                     failConfig("login failed — check the admin password")
                     return@done
                 }
+                if (queryOnly) {
+                    listener.onStatus("asking which link the sensor is using")
+                    sendCli(gen, "link") { reply ->
+                        handleLinkQuery(gen, ssid, wifiPass, reply, LINK_WAIT_POLLS)
+                    }
+                    return@done
+                }
                 if (ssid.isNotEmpty()) {
                     listener.onStatus("saving WiFi over LoRa")
                     sendCli(gen, wifiCommand(ssid, wifiPass)) { reply ->
@@ -753,10 +800,10 @@ class MeshCompanion(
                             failConfig("WiFi credentials rejected")
                             return@sendCli
                         }
-                        sendLink(gen, useWifi, 3)
+                        sendLink(gen, useWifi, LINK_WAIT_POLLS)
                     }
                 } else {
-                    sendLink(gen, useWifi, 3)
+                    sendLink(gen, useWifi, LINK_WAIT_POLLS)
                 }
             }
             val wait = Runnable {
@@ -798,9 +845,51 @@ class MeshCompanion(
             }
             else -> {
                 configBusy = false
-                listener.onStatus("WiFi failed, tracks stay on LoRa")
+                listener.onStatus("WiFi did not join")
                 listener.onLinkMode(false, "")
             }
+        }
+    }
+
+    /**
+     * `link` with no argument. An address means the sensor is already on WiFi,
+     * so the socket opens without `wifi <ssid>`, which would drop the join.
+     * `link lora` plus an address only needs `link wifi`. Anything else sends
+     * the saved network and asks again.
+     */
+    private fun handleLinkQuery(gen: Int, ssid: String, wifiPass: String, reply: String, retries: Int) {
+        if (!sameConfig(gen)) return
+        val ip = IPV4.find(reply)?.value
+        when {
+            reply.startsWith("link wifi") && ip != null -> {
+                configBusy = false
+                listener.onStatus("WiFi $ip")
+                listener.onLinkMode(true, ip)
+            }
+            reply.startsWith("link wait") && retries > 0 -> {
+                listener.onStatus("WiFi still joining")
+                main.postDelayed({
+                    if (!sameConfig(gen)) return@postDelayed
+                    sendCli(gen, "link") { next ->
+                        handleLinkQuery(gen, ssid, wifiPass, next, retries - 1)
+                    }
+                }, 8_000)
+            }
+            // Still joining. `link wifi` does not drop a join that is already running.
+            reply.startsWith("link wait") -> sendLink(gen, true, LINK_WAIT_POLLS)
+            reply.startsWith("link lora") && ip != null -> sendLink(gen, true, LINK_WAIT_POLLS)
+            ssid.isNotEmpty() -> {
+                listener.onStatus("saving WiFi over LoRa")
+                sendCli(gen, wifiCommand(ssid, wifiPass)) { wr ->
+                    if (!sameConfig(gen)) return@sendCli
+                    if (wr.startsWith("wifi bad")) {
+                        failConfig("WiFi credentials rejected")
+                        return@sendCli
+                    }
+                    sendLink(gen, true, LINK_WAIT_POLLS)
+                }
+            }
+            else -> sendLink(gen, true, LINK_WAIT_POLLS)
         }
     }
 
@@ -1038,6 +1127,9 @@ class MeshCompanion(
         private const val TXT_CLI = 1
         private const val ADV_SENSOR = 4
         private const val PATH_UNKNOWN = 0xFF
+        // Polls of `link wifi` while the sensor joins. 8s apart, so this covers
+        // the 40s join and one retry if that attempt fails.
+        private const val LINK_WAIT_POLLS = 10
 
         private val IPV4 = Regex("""\d{1,3}(?:\.\d{1,3}){3}""")
         private val SENSOR_PUB = hexToBytes(

@@ -186,15 +186,11 @@ protected:
         strcpy(reply, "wifi fail");
         return true;
       }
-      if (wifi.failed()) {
-        want_wifi = false;
-        savePrefs();
-        strcpy(reply, "wifi fail");
-        return true;
-      }
+      // A failed join used to save "link lora" here, so tracks stayed on LoRa
+      // across reboots. Keep the request and start the join again.
       want_wifi = true;
       savePrefs();
-      if (!wifi.connected() && !wifi.connecting()) wifi.connect();
+      if (wifi.failed() || (!wifi.connected() && !wifi.connecting())) wifi.connect();
       replyLinkStatus(reply);
       return true;
     }

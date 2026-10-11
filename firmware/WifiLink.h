@@ -33,6 +33,7 @@ private:
 
   void acceptClients();
   void noteIp();
+  void dropClients();
 
   char _ssid[33];
   char _pass[64];

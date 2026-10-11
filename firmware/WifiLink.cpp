@@ -11,7 +11,9 @@
 #undef read
 #undef close
 
-static const uint32_t kJoinMs = 20000;
+// A busy access point can take longer than 20s to hand out an address.
+// Giving up at 20s used to stick tracks on LoRa.
+static const uint32_t kJoinMs = 40000;
 static const int kClients = 2;
 
 struct WifiLink::Impl {
@@ -48,8 +50,22 @@ void WifiLink::copyPass(char* dest, size_t n) const {
   dest[n - 1] = 0;
 }
 
+void WifiLink::dropClients() {
+  if (_impl == NULL) return;
+  for (int i = 0; i < kClients; i++) {
+    if (_impl->clients[i]) _impl->clients[i].stop();
+  }
+  // begin() is not safe to repeat on a live socket, and end() closes
+  // whatever fd it has. Only call it after a successful begin().
+  if (_listening) {
+    _impl->server.end();
+    _listening = false;
+  }
+}
+
 void WifiLink::connect() {
   if (_ssid[0] == 0) return;
+  dropClients();
   if (!_radio_up) {
     WiFi.persistent(false);
     WiFi.mode(WIFI_STA);
@@ -112,10 +128,13 @@ void WifiLink::loop() {
     _state = CONNECTING;
     _ip[0] = 0;
     _started_ms = millis();
+    dropClients();
     return;
   }
   if (_state == CONNECTING && (uint32_t)(millis() - _started_ms) >= kJoinMs) {
     _state = FAIL;
+    // Status only. The passphrase is not printed.
+    Serial.printf("wifi fail status=%d ssid=%s\n", (int)st, _ssid);
   }
 }
 
