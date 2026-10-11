@@ -63,6 +63,9 @@ class MeshCompanion(
     private var bondRegistered = false
     private var flightId = 0
     private var pullAfter = false
+    private var writeAck = false
+    private var repaired = false
+    private var notifyTries = 0
 
     private data class Cmd(
         val bytes: ByteArray,
@@ -82,6 +85,7 @@ class MeshCompanion(
             return
         }
         wantLink = true
+        repaired = false
         ensureBondReceiver()
         stopScan()
         closeGatt()
@@ -146,7 +150,14 @@ class MeshCompanion(
             val state = intent.getIntExtra(BluetoothDevice.EXTRA_BOND_STATE, BluetoothDevice.ERROR)
             val prev = intent.getIntExtra(BluetoothDevice.EXTRA_PREVIOUS_BOND_STATE, BluetoothDevice.ERROR)
             if (state == BluetoothDevice.BOND_BONDED) {
-                beginMtu(open)
+                listener.onStatus("paired")
+                main.postDelayed({
+                    val still = gatt
+                    if (!wantLink || still == null || still.device.address != device.address) return@postDelayed
+                    if (!mtuStarted) beginMtu(still)
+                }, 600)
+            } else if (state == BluetoothDevice.BOND_BONDING) {
+                listener.onStatus("pairing — enter the PIN shown on the companion")
             } else if (state == BluetoothDevice.BOND_NONE && prev == BluetoothDevice.BOND_BONDING) {
                 listener.onStatus("pairing failed")
                 wantLink = false
@@ -211,22 +222,39 @@ class MeshCompanion(
                 g.disconnect()
                 return
             }
-            g.setCharacteristicNotification(notify, true)
-            val cccd = notify.getDescriptor(CCCD)
-            if (cccd == null) {
-                listener.onStatus("notify descriptor missing")
-                return
-            }
-            if (Build.VERSION.SDK_INT >= 33) {
-                g.writeDescriptor(cccd, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
-            } else {
-                cccd.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
-                g.writeDescriptor(cccd)
+            notifyTries = 0
+            main.post {
+                if (wantLink && gatt === g) enableNotify(g)
             }
         }
 
         override fun onDescriptorWrite(g: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {
-            maybeStartProtocol(g)
+            main.post {
+                if (gatt !== g) return@post
+                if (status == BluetoothGatt.GATT_INSUFFICIENT_AUTHENTICATION ||
+                    status == BluetoothGatt.GATT_INSUFFICIENT_ENCRYPTION
+                ) {
+                    repair(g.device)
+                    return@post
+                }
+                if (status != BluetoothGatt.GATT_SUCCESS) {
+                    listener.onStatus("notify failed ($status)")
+                    return@post
+                }
+                // Let this callback return before the first command. Otherwise Android
+                // reports the write as busy and the status stays "write failed".
+                main.postDelayed({
+                    if (wantLink && gatt === g) maybeStartProtocol(g)
+                }, 400)
+            }
+        }
+
+        override fun onCharacteristicWrite(
+            g: BluetoothGatt,
+            characteristic: BluetoothGattCharacteristic,
+            status: Int
+        ) {
+            main.post { handleWriteStatus(status) }
         }
 
         override fun onCharacteristicChanged(g: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
@@ -254,10 +282,13 @@ class MeshCompanion(
                 val open = gatt
                 if (!wantLink || open == null || open !== g) return@postDelayed
                 when (open.device.bondState) {
-                    BluetoothDevice.BOND_BONDED -> beginMtu(open)
-                    BluetoothDevice.BOND_BONDING -> listener.onStatus("pairing — enter the companion PIN")
+                    BluetoothDevice.BOND_BONDED -> main.postDelayed({
+                        if (wantLink && gatt === open && !mtuStarted) beginMtu(open)
+                    }, 600)
+                    BluetoothDevice.BOND_BONDING ->
+                        listener.onStatus("pairing — enter the PIN shown on the companion")
                     else -> {
-                        listener.onStatus("pairing — enter the companion PIN")
+                        listener.onStatus("pairing — enter the PIN shown on the companion")
                         try {
                             if (!open.device.createBond()) listener.onStatus("pairing failed")
                         } catch (ex: SecurityException) {
@@ -276,6 +307,92 @@ class MeshCompanion(
             } else {
                 listener.onStatus("disconnected")
             }
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun enableNotify(g: BluetoothGatt) {
+        val notify = tx ?: return
+        val cccd = notify.getDescriptor(CCCD)
+        if (cccd == null) {
+            listener.onStatus("notify descriptor missing")
+            return
+        }
+        val status = try {
+            g.setCharacteristicNotification(notify, true)
+            if (Build.VERSION.SDK_INT >= 33) {
+                g.writeDescriptor(cccd, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
+            } else {
+                @Suppress("DEPRECATION")
+                cccd.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                if (g.writeDescriptor(cccd)) BluetoothGatt.GATT_SUCCESS else 102
+            }
+        } catch (_: SecurityException) {
+            listener.onStatus("Bluetooth permission missing")
+            return
+        }
+        if (status == BluetoothGatt.GATT_SUCCESS) return
+        if (notifyTries < 4) {
+            notifyTries++
+            main.postDelayed({
+                if (wantLink && gatt === g && !protocolStarted) enableNotify(g)
+            }, 400)
+        } else {
+            listener.onStatus("notify failed ($status)")
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun repair(device: BluetoothDevice) {
+        if (repaired) {
+            listener.onStatus("pairing failed — forget this companion in Bluetooth settings, then scan again")
+            wantLink = false
+            try {
+                gatt?.disconnect()
+            } catch (_: SecurityException) {
+            }
+            return
+        }
+        repaired = true
+        mtuStarted = false
+        servicesRequested = false
+        protocolStarted = false
+        writeAck = false
+        notifyTries = 0
+        requeueInflight()
+        listener.onStatus("pairing — enter the PIN shown on the companion")
+        try {
+            device.javaClass.getMethod("removeBond").invoke(device)
+        } catch (_: Exception) {
+        }
+        main.postDelayed({
+            if (!wantLink) return@postDelayed
+            try {
+                if (!device.createBond()) listener.onStatus("pairing failed")
+            } catch (_: SecurityException) {
+                listener.onStatus("Bluetooth permission missing")
+            }
+        }, 600)
+    }
+
+    private fun handleWriteStatus(status: Int) {
+        writeAck = false
+        if (status == BluetoothGatt.GATT_SUCCESS) {
+            pump()
+            return
+        }
+        val open = gatt
+        if (open != null &&
+            (status == BluetoothGatt.GATT_INSUFFICIENT_AUTHENTICATION ||
+                status == BluetoothGatt.GATT_INSUFFICIENT_ENCRYPTION)
+        ) {
+            repair(open.device)
+            return
+        }
+        if (requeueInflight()) {
+            main.postDelayed({ pump() }, 300)
+        } else if (status != BluetoothGatt.GATT_SUCCESS) {
+            listener.onStatus("write failed ($status)")
         }
     }
 
@@ -523,6 +640,11 @@ class MeshCompanion(
 
     @SuppressLint("MissingPermission")
     private fun pump() {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            main.post { pump() }
+            return
+        }
+        if (writeAck) return
         val cmd: Cmd
         val g: BluetoothGatt
         val characteristic: BluetoothGattCharacteristic
@@ -542,30 +664,79 @@ class MeshCompanion(
             g = open
             characteristic = writeChar
         }
-        armTimeout(id)
-        val wrote = if (Build.VERSION.SDK_INT >= 33) {
-            g.writeCharacteristic(characteristic, cmd.bytes, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)
-        } else {
-            characteristic.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
-            characteristic.value = cmd.bytes
-            if (g.writeCharacteristic(characteristic)) BluetoothGatt.GATT_SUCCESS else BluetoothGatt.GATT_FAILURE
+        val wrote = enqueueWrite(g, characteristic, cmd.bytes)
+        if (wrote == BluetoothGatt.GATT_SUCCESS) {
+            writeAck = true
+            armTimeout(id)
+            return
         }
-        if (wrote != BluetoothGatt.GATT_SUCCESS) {
-            val retry = synchronized(linkLock) {
-                if (inflight === cmd) {
-                    inflight = null
-                    flightId++
-                }
-                if (cmd.tries < 1) {
-                    queue.addFirst(cmd.copy(tries = cmd.tries + 1))
-                    true
-                } else {
-                    false
-                }
+        writeAck = false
+        synchronized(linkLock) {
+            if (inflight === cmd) {
+                inflight = null
+                flightId++
             }
-            if (!retry) listener.onStatus("write failed")
-            pump()
+            if (cmd.tries < 5) queue.addFirst(cmd.copy(tries = cmd.tries + 1))
         }
+        if (cmd.tries < 5) {
+            main.postDelayed({ pump() }, 300)
+        } else {
+            listener.onStatus("write failed ($wrote)")
+        }
+    }
+
+    /** True when the command was put back because it still has tries left. */
+    private fun requeueInflight(): Boolean {
+        return synchronized(linkLock) {
+            val current = inflight ?: return@synchronized false
+            inflight = null
+            flightId++
+            if (current.tries < 5) {
+                queue.addFirst(current.copy(tries = current.tries + 1))
+                true
+            } else {
+                false
+            }
+        }
+    }
+
+    @SuppressLint("MissingPermission", "DEPRECATION")
+    private fun enqueueWrite(
+        g: BluetoothGatt,
+        characteristic: BluetoothGattCharacteristic,
+        value: ByteArray
+    ): Int {
+        val props = characteristic.properties
+        val writeType = when {
+            props and BluetoothGattCharacteristic.PROPERTY_WRITE != 0 ->
+                BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+            props and BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE != 0 ->
+                BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
+            else -> return 101
+        }
+        return try {
+            if (Build.VERSION.SDK_INT >= 33) {
+                val status = g.writeCharacteristic(characteristic, value, writeType)
+                if (status == 101) legacyWrite(g, characteristic, value, writeType) else status
+            } else {
+                legacyWrite(g, characteristic, value, writeType)
+            }
+        } catch (_: SecurityException) {
+            listener.onStatus("Bluetooth permission missing")
+            6
+        }
+    }
+
+    @SuppressLint("MissingPermission", "DEPRECATION")
+    private fun legacyWrite(
+        g: BluetoothGatt,
+        characteristic: BluetoothGattCharacteristic,
+        value: ByteArray,
+        writeType: Int
+    ): Int {
+        characteristic.writeType = writeType
+        characteristic.value = value
+        return if (g.writeCharacteristic(characteristic)) BluetoothGatt.GATT_SUCCESS else 102
     }
 
     private fun armTimeout(id: Int) {
@@ -599,6 +770,8 @@ class MeshCompanion(
         mtuStarted = false
         mtuGatePosted = false
         servicesRequested = false
+        writeAck = false
+        notifyTries = 0
         mtu = 23
         try {
             gatt?.close()
