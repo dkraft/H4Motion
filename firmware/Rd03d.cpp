@@ -34,11 +34,18 @@ bool Rd03d::decodeFrame(const uint8_t* f, RdTarget out[RD03_MAX_TARGETS]) {
 }
 
 void Rd03d::begin() {
+  // 256000 8N1 is exact on an 80 MHz APB (divider 312.5). A 30-byte frame
+  // is about 1.2 ms, and the module reports about ten frames a second.
+  // The software FIFO has to cover a LoRa transmit, which can stall loop()
+  // for seconds while the UART interrupt keeps draining the 128-byte HW FIFO.
+  _serial.setRxBufferSize(4096);
   _serial.begin(RD03_BAUD, SERIAL_8N1, RD03_RX_PIN, RD03_TX_PIN);
   _got = 0;
   _fresh = false;
   _rx = 0;
+  _bad_run = 0;
   _tail_n = 0;
+  _last_byte_ms = millis();
   _next_mode_ms = millis() + 400;
   memset(_tgt, 0, sizeof(_tgt));
   memset(_tail, 0, sizeof(_tail));
@@ -60,9 +67,11 @@ void Rd03d::push(uint8_t b) {
   if (_got < 30) return;
   if (decodeFrame(_buf, _tgt)) {
     _ok++;
+    _bad_run = 0;
     _fresh = true;
   } else {
     _bad++;
+    _bad_run++;
   }
   _got = 0;
 }
@@ -81,15 +90,30 @@ int Rd03d::lastBytes(uint8_t* out, int max_n) const {
 
 void Rd03d::loop() {
   uint32_t now = millis();
-  // The module boots in single-target mode and ignores a command that arrives before it is up.
-  // Keep asking until a multi-target frame is actually parsed.
-  if (_ok == 0 && (int32_t)(now - _next_mode_ms) >= 0) {
+  // Header is locked in after 4 bytes. A gap much longer than one frame
+  // (1.2 ms) means bytes were lost. Drop the partial instead of gluing the
+  // next frame onto it. A lone 0xAA between frames is not a torn frame.
+  if (_got >= 4 && (uint32_t)(now - _last_byte_ms) > 15) {
+    _got = 0;
+    _bad++;
+    _bad_run++;
+  } else if (_got > 0 && _got < 4 && (uint32_t)(now - _last_byte_ms) > 15) {
+    _got = 0;
+  }
+  // Boot is single-target (shorter frames, so the 30-byte tail check fails).
+  // Ask again after a run of bad frames; the module can leave multi-target.
+  if ((_ok == 0 || _bad_run >= 8) && (int32_t)(now - _next_mode_ms) >= 0) {
+#if defined(ARDUINO)
+    if (_bad_run >= 8) Serial.println("radar framing");
+#endif
     sendMultiTarget();
+    _bad_run = 0;
     _next_mode_ms = now + 1000;
   }
   while (_serial.available() > 0) {
     uint8_t b = (uint8_t)_serial.read();
     _rx++;
+    _last_byte_ms = now;
     _tail[_tail_n % 8] = b;
     _tail_n++;
     push(b);

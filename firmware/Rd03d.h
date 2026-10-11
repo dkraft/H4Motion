@@ -54,7 +54,9 @@ private:
   uint32_t _next_mode_ms = 0;
   uint32_t _ok = 0;
   uint32_t _bad = 0;
+  uint32_t _bad_run = 0;
   uint32_t _rx = 0;
+  uint32_t _last_byte_ms = 0;
   uint8_t _tail[8];
   uint32_t _tail_n = 0;
   bool _fresh = false;

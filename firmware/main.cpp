@@ -393,9 +393,15 @@ void loop() {
   bool on_wifi = want_wifi && wifi.connected();
   if (motion.takeMessage(millis(), line, sizeof(line), &is_alert, on_wifi)) {
     bool lora = is_alert || !on_wifi;
-    Serial.printf("%s %s%s\n", lora ? "mesh" : "wifi", is_alert ? "ALERT " : "", line);
-    if (lora) channel.sendText(the_mesh, *the_mesh.getRTCClock(), the_mesh.getNodeName(), line);
-    else wifi.sendLine(line);
+    // Tag is the path this line actually took, so the phone lamp can follow
+    // it even when the private CLI reply is lost. Alerts stay on LoRa, and
+    // their tag still says W when the tracks themselves are on WiFi.
+    char tagged[176];
+    int tn = snprintf(tagged, sizeof(tagged), "%s %s", line, linkTag());
+    const char* out = (tn > 0 && tn < (int)sizeof(tagged)) ? tagged : line;
+    Serial.printf("%s %s%s\n", lora ? "mesh" : "wifi", is_alert ? "ALERT " : "", out);
+    if (lora) channel.sendText(the_mesh, *the_mesh.getRTCClock(), the_mesh.getNodeName(), out);
+    else wifi.sendLine(out);
   }
 
   rtc_clock.tick();

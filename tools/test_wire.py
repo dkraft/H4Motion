@@ -38,6 +38,7 @@ AL_RE = re.compile(
     r"^AL\s+(ENTER|LEAVE|NEAR)\s+d=(-?\d+(?:\.\d+)?)\s+az=(-?\d+)\s+"
     r"x=(-?\d+)\s+y=(-?\d+)\s+s=(-?\d+)\s*$"
 )
+LINK_RE = re.compile(r"\s([LWw])$")
 
 def strip_prefix(text):
     s = text.strip().replace("\x00", "")
@@ -50,8 +51,12 @@ def strip_prefix(text):
             return rest
     return s
 
+def link_of(text):
+    match = LINK_RE.search(strip_prefix(text))
+    return match.group(1) if match else None
+
 def parse_line(text):
-    s = strip_prefix(text)
+    s = LINK_RE.sub("", strip_prefix(text))
     m = RD_RE.match(s)
     if m:
         rest = m.group(3)
@@ -121,6 +126,11 @@ def main():
     sentinel[9] = 0x01
     check(decode_frame(bytes(sentinel))[0][4] is False, "speed 256 is not a target")
 
+    check(parse_line("RD n=1 st=MOVE 1,2,-3 L") == ("RD", 1, "MOVE", [(1, 2, -3)]),
+          "LoRa tag is not a target")
+    check(link_of("AL NEAR d=1.9 az=-25 x=-782 y=1713 s=-16 W") == "W", "WiFi tag on an alert")
+    check(link_of("RD n=0 st=CLEAR w") == "w", "down WiFi still reports LoRa")
+    check(link_of("RD n=0 st=CLEAR") is None, "old line has no tag")
     check(parse_line("hello") is None, "garbage is ignored")
     check(parse_line("NotANode: RD n=2 st=ENTER 1,2,3 -4,5,-6")[3] == [(1, 2, 3), (-4, 5, -6)],
           "two targets")

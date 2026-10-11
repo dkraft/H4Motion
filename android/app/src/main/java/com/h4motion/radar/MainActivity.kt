@@ -49,7 +49,9 @@ class MainActivity : AppCompatActivity() {
             } else if (pendingConfig != null) {
                 val req = pendingConfig
                 pendingConfig = null
-                if (req != null) service?.applyConfig(req.admin, req.ssid, req.wifiPass, req.useWifi)
+                if (req != null) {
+                    service?.applyConfig(req.admin, req.ssid, req.wifiPass, req.useWifi, req.linkOnly)
+                }
             }
         }
 
@@ -155,6 +157,10 @@ class MainActivity : AppCompatActivity() {
                 linkMode.checkedRadioButtonId == R.id.modeWifi
             )
             val high = contrastMode.checkedRadioButtonId == R.id.contrastHigh
+            val credsSame = req.admin == initialAdmin &&
+                req.ssid == initialSsid &&
+                req.wifiPass == initialPass
+            val liveWifi = RadarHub.state.linkWifi
             prefs.edit()
                 .putString("ssid", req.ssid)
                 .putString("wifi_pass", req.wifiPass)
@@ -164,14 +170,16 @@ class MainActivity : AppCompatActivity() {
                 .apply()
             applyContrast(high)
             dialog.dismiss()
-            val sensorSame = req.admin == initialAdmin &&
-                req.ssid == initialSsid &&
-                req.wifiPass == initialPass &&
-                req.useWifi == wantWifi
-            if (sensorSame) return@setOnClickListener
+            // Contrast-only Apply must not touch the radio. A lamp that does
+            // not match the selected path still has to send `link`, even when
+            // the saved choice was already that path.
+            if (credsSame && req.useWifi == wantWifi && req.useWifi == liveWifi) {
+                return@setOnClickListener
+            }
+            val send = req.copy(linkOnly = credsSame)
             pendingScan = false
             pendingDemo = false
-            pendingConfig = req
+            pendingConfig = send
             if (!permissionsReady()) {
                 ensurePermissions()
                 return@setOnClickListener
@@ -200,7 +208,9 @@ class MainActivity : AppCompatActivity() {
         pendingConfig = null
         if (scan) ready.scan()
         else if (demo) ready.toggleDemo()
-        else if (config != null) ready.applyConfig(config.admin, config.ssid, config.wifiPass, config.useWifi)
+        else if (config != null) {
+            ready.applyConfig(config.admin, config.ssid, config.wifiPass, config.useWifi, config.linkOnly)
+        }
     }
 
     private fun highContrast(): Boolean {
@@ -315,6 +325,7 @@ class MainActivity : AppCompatActivity() {
         val admin: String,
         val ssid: String,
         val wifiPass: String,
-        val useWifi: Boolean
+        val useWifi: Boolean,
+        val linkOnly: Boolean = false
     )
 }

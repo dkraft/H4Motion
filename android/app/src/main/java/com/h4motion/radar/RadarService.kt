@@ -29,13 +29,19 @@ class RadarService : Service(), MeshCompanion.Listener {
     inner class LocalBinder : Binder() {
         fun scan() = startLink()
         fun toggleDemo() = setDemo(!demo)
-        fun applyConfig(admin: String, ssid: String, wifiPass: String, useWifi: Boolean) {
+        fun applyConfig(
+            admin: String,
+            ssid: String,
+            wifiPass: String,
+            useWifi: Boolean,
+            linkOnly: Boolean
+        ) {
             setDemo(false)
             if (!companion.isReady()) {
                 onStatus("scan the companion first")
                 return
             }
-            companion.configure(admin, ssid, wifiPass, useWifi)
+            companion.configure(admin, ssid, wifiPass, useWifi, linkOnly)
         }
         fun cycleRange() {
             val next = when (RadarHub.state.rangeM) {
@@ -58,6 +64,8 @@ class RadarService : Service(), MeshCompanion.Listener {
     private var alertSerial = 10
     private var linkStatus = "idle"
     private var wifiIp: String? = null
+    /** Ignore in-flight LoRa lines for a few seconds after WiFi is confirmed. */
+    private var wifiHoldMs = 0L
     private var socketGen = 0
     private var trackSocket: Socket? = null
     @Volatile private var socketThread: Thread? = null
@@ -143,19 +151,38 @@ class RadarService : Service(), MeshCompanion.Listener {
 
     override fun onLinkMode(wifi: Boolean, ip: String) {
         val useWifi = wifi && ip.isNotEmpty()
-        if (useWifi) startSocket(ip) else stopSocket()
+        if (useWifi) {
+            wifiHoldMs = SystemClock.elapsedRealtime()
+            startSocket(ip)
+        } else {
+            wifiHoldMs = 0L
+            stopSocket()
+        }
         if (!demo) RadarHub.update { it.copy(linkWifi = useWifi) }
     }
 
     override fun onStatus(text: String) {
         if (wifiIp != null && text.startsWith("live on #sensemb")) return
-        linkStatus = text
+        // The CLI reply can be lost after the sensor already switched. If the
+        // lamp already matches the saved choice, the tracks told us first.
+        val shown = if (text.startsWith("no reply from the sensor") && lampMatchesSaved()) {
+            if (RadarHub.state.linkWifi) "tracks on WiFi" else "tracks on LoRa"
+        } else {
+            text
+        }
+        linkStatus = shown
         if (!demo) {
-            RadarHub.update { it.copy(status = text, demo = false) }
-            val ongoing = if (text.startsWith("live")) "listening on #sensemb" else text
+            RadarHub.update { it.copy(status = shown, demo = false) }
+            val ongoing = if (shown.startsWith("live")) "listening on #sensemb" else shown
             startAsForeground(ongoing)
             if (text.startsWith("live on #sensemb")) resumeWifi()
         }
+    }
+
+    private fun lampMatchesSaved(): Boolean {
+        val prefs = getSharedPreferences("h4motion", MODE_PRIVATE)
+        val want = if (prefs.contains("use_wifi")) prefs.getBoolean("use_wifi", true) else true
+        return RadarHub.state.linkWifi == want
     }
 
     /** Saved Config choice. A missing preference means WiFi, same as the dialog. */
@@ -175,13 +202,42 @@ class RadarService : Service(), MeshCompanion.Listener {
     }
 
     override fun onChannelText(text: String) {
+        // A LoRa track is proof the sensor is not on WiFi. Alerts always use
+        // the channel, so only their tag (or a track line) may move the lamp.
+        noteLink(text, fromSocket = false)
         if (SenseParser.isAlertLine(text)) {
             applyText(text)
             return
         }
-        // WiFi tracks arrive on the socket. A late LoRa copy would fight that stream.
         if (wifiIp != null) return
         offerTrack(text, -1)
+    }
+
+    /**
+     * The deck lamps follow the path that is carrying tracks right now.
+     * W lights WiFi. L and w light LoRa and close a leftover socket, because
+     * that socket would otherwise hide the LoRa lines.
+     */
+    private fun noteLink(text: String, fromSocket: Boolean) {
+        if (demo) return
+        val tag = SenseParser.linkOf(text)
+        val alert = SenseParser.isAlertLine(text)
+        val wifi = when (tag) {
+            'W' -> true
+            'L', 'w' -> false
+            else -> when {
+                fromSocket -> true
+                !alert -> false
+                else -> return
+            }
+        }
+        if (wifi) {
+            if (!RadarHub.state.linkWifi) RadarHub.update { it.copy(linkWifi = true) }
+            return
+        }
+        if (wifiHoldMs != 0L && SystemClock.elapsedRealtime() - wifiHoldMs < 8_000L) return
+        if (wifiIp != null) stopSocket()
+        if (RadarHub.state.linkWifi) RadarHub.update { it.copy(linkWifi = false) }
     }
 
     /**
@@ -413,9 +469,15 @@ class RadarService : Service(), MeshCompanion.Listener {
                         val line = reader.readLine() ?: break
                         if (SenseParser.isAlertLine(line)) {
                             main.post {
-                                if (gen == socketGen && !demo) applyText(line)
+                                if (gen == socketGen && !demo) {
+                                    noteLink(line, fromSocket = true)
+                                    applyText(line)
+                                }
                             }
                         } else {
+                            main.post {
+                                if (gen == socketGen && !demo) noteLink(line, fromSocket = true)
+                            }
                             offerTrack(line, gen)
                         }
                     }

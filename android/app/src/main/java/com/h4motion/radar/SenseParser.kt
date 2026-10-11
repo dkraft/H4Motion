@@ -29,11 +29,22 @@ object SenseParser {
     private val al = Regex(
         """^AL\s+(ENTER|LEAVE|NEAR)\s+d=(-?\d+(?:\.\d+)?)\s+az=(-?\d+)\s+x=(-?\d+)\s+y=(-?\d+)\s+s=(-?\d+)\s*$"""
     )
+    private val linkTag = Regex("""\s([LWw])$""")
 
     fun isAlertLine(raw: String): Boolean = stripPrefix(raw).startsWith("AL ")
 
+    /**
+     * Trailing L, W, or w from the sensor. W means tracks are on WiFi.
+     * L and w mean the line was sent on LoRa (w: WiFi was requested but is down).
+     * A line from older firmware has no tag.
+     */
+    fun linkOf(raw: String): Char? {
+        val match = linkTag.find(stripPrefix(raw)) ?: return null
+        return match.groupValues[1][0]
+    }
+
     fun parse(raw: String): Event? {
-        val text = stripPrefix(raw)
+        val text = linkTag.replace(stripPrefix(raw), "")
         rd.matchEntire(text)?.let { m ->
             val targets = tgt.findAll(m.groupValues[3]).map {
                 Target(it.groupValues[1].toInt(), it.groupValues[2].toInt(), it.groupValues[3].toInt())

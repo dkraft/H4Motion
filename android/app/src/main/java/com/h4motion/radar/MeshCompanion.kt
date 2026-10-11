@@ -123,7 +123,13 @@ class MeshCompanion(
      * The WiFi passphrase is only placed in the CLI frame. It is not logged
      * and it is not sent on #sensemb.
      */
-    fun configure(admin: String, ssid: String, wifiPass: String, useWifi: Boolean) {
+    fun configure(
+        admin: String,
+        ssid: String,
+        wifiPass: String,
+        useWifi: Boolean,
+        linkOnly: Boolean = false
+    ) {
         if (!isReady()) {
             listener.onStatus("scan the companion first")
             return
@@ -137,7 +143,7 @@ class MeshCompanion(
             listener.onStatus(problem)
             return
         }
-        startAdmin(admin, ssid, wifiPass, useWifi, queryOnly = false)
+        startAdmin(admin, ssid, wifiPass, useWifi, queryOnly = false, linkOnly = linkOnly)
     }
 
     /**
@@ -156,7 +162,7 @@ class MeshCompanion(
             listener.onStatus(problem)
             return
         }
-        startAdmin(admin, "", "", useWifi = false, queryOnly = false)
+        startAdmin(admin, "", "", useWifi = false, queryOnly = false, linkOnly = true)
     }
 
     /**
@@ -176,7 +182,7 @@ class MeshCompanion(
             listener.onStatus(problem)
             return
         }
-        startAdmin(admin, ssid, wifiPass, useWifi = true, queryOnly = true)
+        startAdmin(admin, ssid, wifiPass, useWifi = true, queryOnly = true, linkOnly = false)
     }
 
     private fun startAdmin(
@@ -184,7 +190,8 @@ class MeshCompanion(
         ssid: String,
         wifiPass: String,
         useWifi: Boolean,
-        queryOnly: Boolean
+        queryOnly: Boolean,
+        linkOnly: Boolean
     ) {
         cancelConfig()
         val gen = configGen
@@ -201,10 +208,10 @@ class MeshCompanion(
                         failConfig("could not add H4Motion on the companion")
                         return@added
                     }
-                    loginThen(gen, admin, ssid, wifiPass, useWifi, queryOnly)
+                    loginThen(gen, admin, ssid, wifiPass, useWifi, queryOnly, linkOnly)
                 }
             } else {
-                loginThen(gen, admin, ssid, wifiPass, useWifi, queryOnly)
+                loginThen(gen, admin, ssid, wifiPass, useWifi, queryOnly, linkOnly)
             }
         }
     }
@@ -781,7 +788,8 @@ class MeshCompanion(
         ssid: String,
         wifiPass: String,
         useWifi: Boolean,
-        queryOnly: Boolean
+        queryOnly: Boolean,
+        linkOnly: Boolean
     ) {
         listener.onStatus("logging in to H4Motion")
         send(loginFrame(admin), setOf(SENT, ERR)) { frame ->
@@ -813,9 +821,14 @@ class MeshCompanion(
                     return@done
                 }
                 // Credentials restart the join. A LoRa switch must not do that,
-                // or a lost follow-up leaves tracks on WiFi.
+                // or a lost follow-up leaves tracks on WiFi. An unchanged
+                // network only needs `link wifi`.
                 if (!useWifi) {
                     sendLink(gen, false, 0)
+                    return@done
+                }
+                if (linkOnly || ssid.isEmpty()) {
+                    sendLink(gen, true, LINK_WAIT_POLLS)
                     return@done
                 }
                 if (ssid.isNotEmpty()) {
@@ -845,7 +858,11 @@ class MeshCompanion(
         if (!sameConfig(gen)) return
         listener.onStatus(if (useWifi) "asking the sensor to use WiFi" else "asking the sensor to use LoRa")
         val command = if (useWifi) "link wifi" else "link lora"
-        sendCli(gen, command) { reply -> handleLinkReply(gen, useWifi, reply, retries) }
+        // One hop at SF10 / 62.5 kHz is a few seconds. Ask again twice before
+        // giving up, so one lost flood does not leave the lamp on the old path.
+        sendCli(gen, command, triesLeft = 2, timeoutMs = 30_000) { reply ->
+            handleLinkReply(gen, useWifi, reply, retries)
+        }
     }
 
     private fun handleLinkReply(gen: Int, useWifi: Boolean, reply: String, retries: Int) {
@@ -870,8 +887,13 @@ class MeshCompanion(
             }
             else -> {
                 configBusy = false
-                listener.onStatus("WiFi did not join")
-                listener.onLinkMode(false, "")
+                if (useWifi) {
+                    listener.onStatus("WiFi did not join")
+                    listener.onLinkMode(false, "")
+                } else {
+                    // Do not paint LoRa until a reply or a LoRa track says so.
+                    listener.onStatus("sensor did not confirm LoRa")
+                }
             }
         }
     }
@@ -918,7 +940,13 @@ class MeshCompanion(
         }
     }
 
-    private fun sendCli(gen: Int, command: String, onReply: (String) -> Unit) {
+    private fun sendCli(
+        gen: Int,
+        command: String,
+        triesLeft: Int = 0,
+        timeoutMs: Long = 90_000,
+        onReply: (String) -> Unit
+    ) {
         send(cliFrame(command), setOf(SENT, ERR)) { frame ->
             if (!sameConfig(gen)) return@send
             if ((frame[0].toInt() and 0xFF) == ERR) {
@@ -934,10 +962,16 @@ class MeshCompanion(
             val wait = Runnable {
                 if (!sameConfig(gen) || cliWaiter == null) return@Runnable
                 cliWaiter = null
-                failConfig("no reply from the sensor — it may be out of range")
+                cliTimeout = null
+                if (triesLeft > 0) {
+                    listener.onStatus("no reply yet, asking again")
+                    sendCli(gen, command, triesLeft - 1, timeoutMs, onReply)
+                } else {
+                    failConfig("no reply from the sensor — it may be out of range")
+                }
             }
             cliTimeout = wait
-            main.postDelayed(wait, 90_000)
+            main.postDelayed(wait, timeoutMs)
         }
     }
 
