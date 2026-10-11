@@ -141,6 +141,25 @@ class MeshCompanion(
     }
 
     /**
+     * One try per Scan when the saved choice is LoRa. Sends `link lora` only,
+     * so a sensor still publishing on WiFi actually stops.
+     */
+    fun preferLora(admin: String) {
+        if (resumeUsed || configBusy || !isReady()) return
+        resumeUsed = true
+        if (mtu < 180) {
+            listener.onStatus("BLE MTU $mtu is too small for sensor setup")
+            return
+        }
+        val problem = credentialProblem(admin, "", "")
+        if (problem != null) {
+            listener.onStatus(problem)
+            return
+        }
+        startAdmin(admin, "", "", useWifi = false, queryOnly = false)
+    }
+
+    /**
      * One try per Scan. Asks `link` before sending credentials, so a sensor
      * that is already on WiFi is not bounced off the access point. If tracks
      * are still on LoRa, the saved network is sent and then `link wifi`.
@@ -791,6 +810,12 @@ class MeshCompanion(
                     sendCli(gen, "link") { reply ->
                         handleLinkQuery(gen, ssid, wifiPass, reply, LINK_WAIT_POLLS)
                     }
+                    return@done
+                }
+                // Credentials restart the join. A LoRa switch must not do that,
+                // or a lost follow-up leaves tracks on WiFi.
+                if (!useWifi) {
+                    sendLink(gen, false, 0)
                     return@done
                 }
                 if (ssid.isNotEmpty()) {

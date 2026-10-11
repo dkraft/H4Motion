@@ -162,12 +162,15 @@ class RadarService : Service(), MeshCompanion.Listener {
     private fun resumeWifi() {
         val prefs = getSharedPreferences("h4motion", MODE_PRIVATE)
         val want = if (prefs.contains("use_wifi")) prefs.getBoolean("use_wifi", true) else true
-        if (!want) return
         val storedSsid = prefs.getString("ssid", null)
         val storedAdmin = prefs.getString("admin", null)
+        val admin = if (storedAdmin.isNullOrBlank() || storedAdmin == "password") "123456" else storedAdmin
+        if (!want) {
+            companion.preferLora(admin)
+            return
+        }
         val ssid = if (storedSsid.isNullOrBlank()) "BPSSI" else storedSsid
         val pass = if (storedSsid.isNullOrBlank()) "KoalaBear" else prefs.getString("wifi_pass", "").orEmpty()
-        val admin = if (storedAdmin.isNullOrBlank() || storedAdmin == "password") "123456" else storedAdmin
         companion.resumeTracks(admin, ssid, pass)
     }
 

@@ -13,7 +13,7 @@ import android.os.SystemClock
 import android.view.View
 import android.widget.Button
 import android.widget.EditText
-import android.widget.RadioButton
+import android.widget.RadioGroup
 import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
@@ -123,20 +123,22 @@ class MainActivity : AppCompatActivity() {
         val ssid = view.findViewById<EditText>(R.id.ssid)
         val wifiPass = view.findViewById<EditText>(R.id.wifiPass)
         val admin = view.findViewById<EditText>(R.id.adminPass)
-        val useWifi = view.findViewById<RadioButton>(R.id.modeWifi)
+        val linkMode = view.findViewById<RadioGroup>(R.id.linkMode)
         val storedSsid = prefs.getString("ssid", null)
         val storedAdmin = prefs.getString("admin", null)
         ssid.setText(if (storedSsid.isNullOrBlank()) "BPSSI" else storedSsid)
         wifiPass.setText(if (storedSsid.isNullOrBlank()) "KoalaBear" else prefs.getString("wifi_pass", ""))
         admin.setText(if (storedAdmin.isNullOrBlank() || storedAdmin == "password") "123456" else storedAdmin)
-        useWifi.isChecked = if (prefs.contains("use_wifi")) prefs.getBoolean("use_wifi", true) else true
+        // Unchecking the WiFi button leaves the group with nothing selected.
+        val wantWifi = if (prefs.contains("use_wifi")) prefs.getBoolean("use_wifi", true) else true
+        linkMode.check(if (wantWifi) R.id.modeWifi else R.id.modeLora)
         val dialog = AlertDialog.Builder(this).setView(view).create()
         view.findViewById<Button>(R.id.btnApply).setOnClickListener {
             val req = ConfigRequest(
                 admin.text.toString(),
                 ssid.text.toString(),
                 wifiPass.text.toString(),
-                useWifi.isChecked
+                linkMode.checkedRadioButtonId == R.id.modeWifi
             )
             prefs.edit()
                 .putString("ssid", req.ssid)

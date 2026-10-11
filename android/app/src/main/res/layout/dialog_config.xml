@@ -59,6 +59,7 @@
                 android:id="@+id/modeLora"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                android:buttonTint="#8DFFB0"
                 android:text="Tracks on LoRa"
                 android:textColor="#E8FFE8" />
 
@@ -66,7 +67,7 @@
                 android:id="@+id/modeWifi"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:checked="true"
+                android:buttonTint="#8DFFB0"
                 android:text="Tracks on WiFi"
                 android:textColor="#E8FFE8" />
         </RadioGroup>
