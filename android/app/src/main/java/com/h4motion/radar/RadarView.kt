@@ -25,6 +25,14 @@ class RadarView @JvmOverloads constructor(
     attrs: AttributeSet? = null
 ) : View(context, attrs) {
 
+    private var backdrop = Color.parseColor("#04140C")
+    private var ringColor = Color.parseColor("#1F6B3A")
+    private var nearRing = Color.parseColor("#5A2020")
+    private var blipNear = Color.parseColor("#FF4D4D")
+    private var blipClose = Color.parseColor("#FFCC33")
+    private var blipOpen = Color.parseColor("#7DFFB3")
+    private var blipRadius = 10f
+
     private val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
         color = Color.parseColor("#0B2816")
@@ -32,12 +40,12 @@ class RadarView @JvmOverloads constructor(
     private val ringPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         strokeWidth = 2f
-        color = Color.parseColor("#1F6B3A")
+        color = ringColor
     }
     private val edgePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         strokeWidth = 3f
-        color = Color.parseColor("#1F6B3A")
+        color = ringColor
     }
     private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#8FBF9A")
@@ -53,6 +61,44 @@ class RadarView @JvmOverloads constructor(
     private val sensorPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
         color = Color.parseColor("#7DFFB3")
+    }
+
+    /** Black field, white marks. Near stays red and a closing return stays yellow. */
+    fun setHighContrast(on: Boolean) {
+        if (on) {
+            backdrop = Color.BLACK
+            fillPaint.color = Color.BLACK
+            ringColor = Color.WHITE
+            nearRing = Color.parseColor("#FF2A2A")
+            ringPaint.strokeWidth = 4f
+            edgePaint.strokeWidth = 5f
+            crossPaint.color = Color.WHITE
+            crossPaint.strokeWidth = 3f
+            textPaint.color = Color.WHITE
+            sensorPaint.color = Color.WHITE
+            blipNear = Color.parseColor("#FF2A2A")
+            blipClose = Color.parseColor("#FFE14A")
+            blipOpen = Color.WHITE
+            blipRadius = 14f
+        } else {
+            backdrop = Color.parseColor("#04140C")
+            fillPaint.color = Color.parseColor("#0B2816")
+            ringColor = Color.parseColor("#1F6B3A")
+            nearRing = Color.parseColor("#5A2020")
+            ringPaint.strokeWidth = 2f
+            edgePaint.strokeWidth = 3f
+            crossPaint.color = Color.parseColor("#144D28")
+            crossPaint.strokeWidth = 2f
+            textPaint.color = Color.parseColor("#8FBF9A")
+            sensorPaint.color = Color.parseColor("#7DFFB3")
+            blipNear = Color.parseColor("#FF4D4D")
+            blipClose = Color.parseColor("#FFCC33")
+            blipOpen = Color.parseColor("#7DFFB3")
+            blipRadius = 10f
+        }
+        ringPaint.color = ringColor
+        edgePaint.color = ringColor
+        invalidate()
     }
 
     var rangeM: Int = 8
@@ -85,7 +131,7 @@ class RadarView @JvmOverloads constructor(
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
-        canvas.drawColor(Color.parseColor("#04140C"))
+        canvas.drawColor(backdrop)
         val padX = dp(4f)
         val padTop = dp(10f)
         val padBottom = dp(14f)
@@ -113,9 +159,9 @@ class RadarView @JvmOverloads constructor(
         val nearPx = rangePx * 2500f / rangeMm.toFloat()
         if (nearPx < rangePx) {
             val near = RectF(cx - nearPx, cy - nearPx, cx + nearPx, cy + nearPx)
-            ringPaint.color = Color.parseColor("#5A2020")
+            ringPaint.color = nearRing
             canvas.drawArc(near, WEDGE_START, WEDGE_SWEEP, false, ringPaint)
-            ringPaint.color = Color.parseColor("#1F6B3A")
+            ringPaint.color = ringColor
         }
 
         canvas.drawArc(arc, WEDGE_START, WEDGE_SWEEP, true, edgePaint)
@@ -126,11 +172,11 @@ class RadarView @JvmOverloads constructor(
             val sy = cy - (plot.yMm / rangeMm * rangePx).toFloat()
             val dist = hypot(blip.xMm.toDouble(), blip.yMm.toDouble())
             blipPaint.color = when {
-                dist <= 2500.0 -> Color.parseColor("#FF4D4D")
-                blip.spdCms < 0 -> Color.parseColor("#FFCC33")
-                else -> Color.parseColor("#7DFFB3")
+                dist <= 2500.0 -> blipNear
+                blip.spdCms < 0 -> blipClose
+                else -> blipOpen
             }
-            canvas.drawCircle(sx, sy, 10f, blipPaint)
+            canvas.drawCircle(sx, sy, blipRadius, blipPaint)
         }
 
         canvas.drawCircle(cx, cy, 5f, sensorPaint)

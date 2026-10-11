@@ -25,16 +25,23 @@ class InstrumentDeck @JvmOverloads constructor(
     attrs: AttributeSet? = null
 ) : View(context, attrs) {
 
-    private val amber = Color.parseColor("#FFC14D")
-    private val amberSoft = Color.parseColor("#E7C48A")
-    private val nearRed = Color.parseColor("#FF5A3C")
-    private val labelAmber = Color.parseColor("#C4893A")
+    private var valueColor = Color.parseColor("#FFC14D")
+    private var openingColor = Color.parseColor("#E7C48A")
+    private var closingColor = Color.parseColor("#FFC14D")
+    private var nearColor = Color.parseColor("#FF5A3C")
+    private var labelColor = Color.parseColor("#C4893A")
+    private var inactiveColor = Color.parseColor("#6E5430")
+    private var activeInk = Color.parseColor("#FFC14D")
 
     private val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
         color = Color.parseColor("#140F0A")
     }
     private val hotFill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+        color = Color.parseColor("#2A1A0C")
+    }
+    private val modeHot = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
         color = Color.parseColor("#2A1A0C")
     }
@@ -49,22 +56,62 @@ class InstrumentDeck @JvmOverloads constructor(
         color = Color.parseColor("#5C3E18")
     }
     private val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = labelAmber
+        color = labelColor
         typeface = Typeface.MONOSPACE
         letterSpacing = 0.16f
     }
     private val valuePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = amber
+        color = valueColor
         typeface = Typeface.MONOSPACE
     }
     private val dimPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#6E5430")
+        color = inactiveColor
         typeface = Typeface.MONOSPACE
     }
     private val tagPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = amber
+        color = valueColor
         typeface = Typeface.MONOSPACE
         letterSpacing = 0.12f
+    }
+
+    /** White marks on black. The lit half of the mode bar flips to black on white. */
+    fun setHighContrast(on: Boolean) {
+        if (on) {
+            valueColor = Color.WHITE
+            openingColor = Color.WHITE
+            closingColor = Color.parseColor("#FFE14A")
+            nearColor = Color.parseColor("#FF2A2A")
+            labelColor = Color.WHITE
+            inactiveColor = Color.WHITE
+            activeInk = Color.BLACK
+            fillPaint.color = Color.BLACK
+            hotFill.color = Color.BLACK
+            modeHot.color = Color.WHITE
+            linePaint.color = Color.WHITE
+            linePaint.strokeWidth = 3f
+            dimLine.color = Color.WHITE
+            dimLine.strokeWidth = 2f
+        } else {
+            valueColor = Color.parseColor("#FFC14D")
+            openingColor = Color.parseColor("#E7C48A")
+            closingColor = Color.parseColor("#FFC14D")
+            nearColor = Color.parseColor("#FF5A3C")
+            labelColor = Color.parseColor("#C4893A")
+            inactiveColor = Color.parseColor("#6E5430")
+            activeInk = Color.parseColor("#FFC14D")
+            fillPaint.color = Color.parseColor("#140F0A")
+            hotFill.color = Color.parseColor("#2A1A0C")
+            modeHot.color = Color.parseColor("#2A1A0C")
+            linePaint.color = Color.parseColor("#A56B2A")
+            linePaint.strokeWidth = 1.5f
+            dimLine.color = Color.parseColor("#5C3E18")
+            dimLine.strokeWidth = 1.5f
+        }
+        labelPaint.color = labelColor
+        valuePaint.color = valueColor
+        dimPaint.color = inactiveColor
+        tagPaint.color = valueColor
+        invalidate()
     }
     private val lampPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val clock: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm:ss")
@@ -129,7 +176,7 @@ class InstrumentDeck @JvmOverloads constructor(
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
-        valuePaint.color = amber
+        valuePaint.color = valueColor
         valuePaint.letterSpacing = 0f
         val mode = RectF(0f, 0f, width.toFloat(), modeH())
         drawMode(canvas, mode)
@@ -161,7 +208,7 @@ class InstrumentDeck @JvmOverloads constructor(
             active.top + inset,
             active.right - inset,
             active.bottom - inset,
-            hotFill
+            modeHot
         )
         canvas.drawRect(rect, linePaint)
         frame(canvas, rect, linePaint)
@@ -178,6 +225,8 @@ class InstrumentDeck @JvmOverloads constructor(
 
     private fun drawChoice(canvas: Canvas, rect: RectF, word: String, on: Boolean) {
         val paint = if (on) valuePaint else dimPaint
+        val ink = if (on) activeInk else inactiveColor
+        paint.color = ink
         paint.textSize = dp(14f)
         paint.letterSpacing = 0.18f
         val lamp = dp(8f)
@@ -186,11 +235,13 @@ class InstrumentDeck @JvmOverloads constructor(
         val cy = rect.centerY() + dp(2f)
         lampPaint.style = if (on) Paint.Style.FILL else Paint.Style.STROKE
         lampPaint.strokeWidth = dp(1.5f)
-        lampPaint.color = if (on) amber else Color.parseColor("#6E5430")
+        lampPaint.color = ink
         canvas.drawRect(cx, cy - lamp / 2f, cx + lamp, cy + lamp / 2f, lampPaint)
         val baseline = cy - (paint.fontMetrics.ascent + paint.fontMetrics.descent) / 2f
         canvas.drawText(word, cx + lamp + dp(8f), baseline, paint)
         paint.letterSpacing = 0f
+        if (on) valuePaint.color = valueColor
+        else dimPaint.color = inactiveColor
     }
 
     private fun drawEnter(canvas: Canvas, rect: RectF, title: String, mark: RadarHub.EnterMark?) {
@@ -225,16 +276,16 @@ class InstrumentDeck @JvmOverloads constructor(
                 dimPaint.textSize = dp(14f)
                 canvas.drawText("NO CONTACT", numX, rect.top + dp(78f), dimPaint)
                 drawLatency(canvas, numX, rect.top + dp(122f))
-                drawTape(canvas, rect, null, Color.parseColor("#6E5430"))
+                drawTape(canvas, rect, null, inactiveColor)
                 return@clipped
             }
             val meters = hypot(primary.xMm.toDouble(), primary.yMm.toDouble()).toFloat() / 1000f
             val az = Math.toDegrees(atan2(primary.xMm.toDouble(), primary.yMm.toDouble())).toInt()
             val near = meters <= 2.5f
             val tone = when {
-                near -> nearRed
-                primary.spdCms < 0 -> amber
-                else -> amberSoft
+                near -> nearColor
+                primary.spdCms < 0 -> closingColor
+                else -> openingColor
             }
             val motion = when {
                 near -> "NEAR"
@@ -256,7 +307,7 @@ class InstrumentDeck @JvmOverloads constructor(
             valuePaint.textSize = dp(12f)
             canvas.drawText("m", numX + heroW + dp(4f), heroY, valuePaint)
 
-            valuePaint.color = amber
+            valuePaint.color = valueColor
             valuePaint.textSize = dp(13f)
             canvas.drawText("AZ $az°", numX, rect.top + dp(80f), valuePaint)
             val spd = if (primary.spdCms > 0) "+${primary.spdCms}" else primary.spdCms.toString()
@@ -264,7 +315,7 @@ class InstrumentDeck @JvmOverloads constructor(
             drawLatency(canvas, numX, rect.top + dp(122f))
             drawTape(canvas, rect, meters, tone)
         }
-        valuePaint.color = amber
+        valuePaint.color = valueColor
     }
 
     /** Age of the picture on screen. A steady link sawtooths up to about 333 ms. */
@@ -281,10 +332,10 @@ class InstrumentDeck @JvmOverloads constructor(
             else -> String.format(Locale.US, "LAT %d ms", age)
         }
         val paint = if (age >= 1000L) valuePaint else dimPaint
-        if (age >= 1000L) valuePaint.color = nearRed
+        if (age >= 1000L) valuePaint.color = nearColor
         paint.textSize = dp(12f)
         canvas.drawText(text, x, baseline, paint)
-        if (age >= 1000L) valuePaint.color = amber
+        if (age >= 1000L) valuePaint.color = valueColor
     }
 
     private fun closestBlip(): RadarHub.Blip? {
@@ -324,7 +375,7 @@ class InstrumentDeck @JvmOverloads constructor(
     }
 
     private fun fieldTitle(canvas: Canvas, rect: RectF, title: String) {
-        labelPaint.color = labelAmber
+        labelPaint.color = labelColor
         labelPaint.textSize = dp(8f)
         labelPaint.letterSpacing = 0.16f
         canvas.drawText(title, rect.left + dp(8f), rect.top + dp(14f), labelPaint)

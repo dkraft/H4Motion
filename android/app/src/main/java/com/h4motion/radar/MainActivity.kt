@@ -6,6 +6,8 @@ import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
 import android.content.pm.PackageManager
+import android.content.res.ColorStateList
+import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
@@ -13,6 +15,7 @@ import android.os.SystemClock
 import android.view.View
 import android.widget.Button
 import android.widget.EditText
+import android.widget.RadioButton
 import android.widget.RadioGroup
 import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
@@ -81,6 +84,7 @@ class MainActivity : AppCompatActivity() {
         deck = findViewById(R.id.deck)
         radar = findViewById(R.id.radar)
         rangeButton = findViewById(R.id.btnRange)
+        applyContrast(highContrast())
 
         findViewById<Button>(R.id.btnScan).setOnClickListener { requestAction(scan = true) }
         findViewById<Button>(R.id.btnConfig).setOnClickListener { showConfig() }
@@ -124,14 +128,24 @@ class MainActivity : AppCompatActivity() {
         val wifiPass = view.findViewById<EditText>(R.id.wifiPass)
         val admin = view.findViewById<EditText>(R.id.adminPass)
         val linkMode = view.findViewById<RadioGroup>(R.id.linkMode)
+        val contrastMode = view.findViewById<RadioGroup>(R.id.contrastMode)
         val storedSsid = prefs.getString("ssid", null)
         val storedAdmin = prefs.getString("admin", null)
         ssid.setText(if (storedSsid.isNullOrBlank()) "BPSSI" else storedSsid)
         wifiPass.setText(if (storedSsid.isNullOrBlank()) "KoalaBear" else prefs.getString("wifi_pass", ""))
         admin.setText(if (storedAdmin.isNullOrBlank() || storedAdmin == "password") "123456" else storedAdmin)
-        // Unchecking the WiFi button leaves the group with nothing selected.
+        // Unchecking one radio leaves the group with nothing selected.
         val wantWifi = if (prefs.contains("use_wifi")) prefs.getBoolean("use_wifi", true) else true
         linkMode.check(if (wantWifi) R.id.modeWifi else R.id.modeLora)
+        val initialContrast = highContrast()
+        contrastMode.check(if (initialContrast) R.id.contrastHigh else R.id.contrastNormal)
+        val initialAdmin = admin.text.toString()
+        val initialSsid = ssid.text.toString()
+        val initialPass = wifiPass.text.toString()
+        paintConfig(view, initialContrast)
+        contrastMode.setOnCheckedChangeListener { _, checkedId ->
+            paintConfig(view, checkedId == R.id.contrastHigh)
+        }
         val dialog = AlertDialog.Builder(this).setView(view).create()
         view.findViewById<Button>(R.id.btnApply).setOnClickListener {
             val req = ConfigRequest(
@@ -140,13 +154,21 @@ class MainActivity : AppCompatActivity() {
                 wifiPass.text.toString(),
                 linkMode.checkedRadioButtonId == R.id.modeWifi
             )
+            val high = contrastMode.checkedRadioButtonId == R.id.contrastHigh
             prefs.edit()
                 .putString("ssid", req.ssid)
                 .putString("wifi_pass", req.wifiPass)
                 .putString("admin", req.admin)
                 .putBoolean("use_wifi", req.useWifi)
+                .putBoolean("high_contrast", high)
                 .apply()
+            applyContrast(high)
             dialog.dismiss()
+            val sensorSame = req.admin == initialAdmin &&
+                req.ssid == initialSsid &&
+                req.wifiPass == initialPass &&
+                req.useWifi == wantWifi
+            if (sensorSame) return@setOnClickListener
             pendingScan = false
             pendingDemo = false
             pendingConfig = req
@@ -179,6 +201,65 @@ class MainActivity : AppCompatActivity() {
         if (scan) ready.scan()
         else if (demo) ready.toggleDemo()
         else if (config != null) ready.applyConfig(config.admin, config.ssid, config.wifiPass, config.useWifi)
+    }
+
+    private fun highContrast(): Boolean {
+        return getSharedPreferences("h4motion", MODE_PRIVATE).getBoolean("high_contrast", false)
+    }
+
+    /** Normal keeps the phosphor colors. High contrast is white on black. */
+    private fun applyContrast(high: Boolean) {
+        val bg = if (high) Color.BLACK else Color.parseColor("#06110C")
+        val fg = if (high) Color.WHITE else Color.parseColor("#B7E7C7")
+        val bannerBg = if (high) Color.BLACK else Color.parseColor("#2A140C")
+        val bannerFg = if (high) Color.parseColor("#FFE14A") else Color.parseColor("#FFC14D")
+        val buttonBg = if (high) Color.WHITE else Color.parseColor("#1F6B3A")
+        val buttonFg = if (high) Color.BLACK else Color.parseColor("#E8FFE8")
+        findViewById<View>(R.id.root).setBackgroundColor(bg)
+        status.setTextColor(fg)
+        banner.setBackgroundColor(bannerBg)
+        banner.setTextColor(bannerFg)
+        window.statusBarColor = bg
+        window.navigationBarColor = bg
+        for (id in intArrayOf(R.id.btnScan, R.id.btnConfig, R.id.btnRange)) {
+            findViewById<Button>(id).apply {
+                backgroundTintList = ColorStateList.valueOf(buttonBg)
+                setTextColor(buttonFg)
+            }
+        }
+        radar.setHighContrast(high)
+        deck.setHighContrast(high)
+    }
+
+    private fun paintConfig(view: View, high: Boolean) {
+        val bg = if (high) Color.BLACK else Color.parseColor("#06110C")
+        val fg = if (high) Color.WHITE else Color.parseColor("#E8FFE8")
+        val note = if (high) Color.WHITE else Color.parseColor("#B7E7C7")
+        val hint = if (high) Color.parseColor("#C8C8C8") else Color.parseColor("#6E9A7C")
+        val tint = if (high) Color.WHITE else Color.parseColor("#8DFFB0")
+        view.findViewById<View>(R.id.configRoot).setBackgroundColor(bg)
+        view.findViewById<TextView>(R.id.configNote).setTextColor(note)
+        view.findViewById<TextView>(R.id.displayLabel).setTextColor(note)
+        for (id in intArrayOf(R.id.ssid, R.id.wifiPass, R.id.adminPass)) {
+            view.findViewById<EditText>(id).apply {
+                setTextColor(fg)
+                setHintTextColor(hint)
+            }
+        }
+        for (id in intArrayOf(R.id.modeLora, R.id.modeWifi, R.id.contrastNormal, R.id.contrastHigh)) {
+            view.findViewById<RadioButton>(id).apply {
+                setTextColor(fg)
+                buttonTintList = ColorStateList.valueOf(tint)
+            }
+        }
+        val buttonBg = if (high) Color.WHITE else Color.parseColor("#1F6B3A")
+        val buttonFg = if (high) Color.BLACK else Color.parseColor("#E8FFE8")
+        for (id in intArrayOf(R.id.btnApply, R.id.btnDemoRow)) {
+            view.findViewById<Button>(id).apply {
+                backgroundTintList = ColorStateList.valueOf(buttonBg)
+                setTextColor(buttonFg)
+            }
+        }
     }
 
     private fun render(state: RadarHub.State) {
