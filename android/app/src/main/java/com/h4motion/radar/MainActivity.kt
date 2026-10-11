@@ -30,7 +30,7 @@ class MainActivity : AppCompatActivity() {
     private var unlisten: (() -> Unit)? = null
     private lateinit var status: TextView
     private lateinit var banner: TextView
-    private lateinit var tracks: TextView
+    private lateinit var deck: InstrumentDeck
     private lateinit var radar: RadarView
     private lateinit var rangeButton: Button
 
@@ -78,7 +78,7 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
         status = findViewById(R.id.status)
         banner = findViewById(R.id.alertBanner)
-        tracks = findViewById(R.id.tracks)
+        deck = findViewById(R.id.deck)
         radar = findViewById(R.id.radar)
         rangeButton = findViewById(R.id.btnRange)
 
@@ -187,15 +187,7 @@ class MainActivity : AppCompatActivity() {
         val alertLive = state.alert != null && SystemClock.elapsedRealtime() < state.alertUntilMs
         banner.visibility = if (alertLive) View.VISIBLE else View.GONE
         banner.text = state.alert ?: ""
-        tracks.text = if (state.blips.isEmpty()) {
-            "no targets"
-        } else {
-            state.blips.joinToString("\n") { blip ->
-                val meters = kotlin.math.hypot(blip.xMm.toDouble(), blip.yMm.toDouble()) / 1000.0
-                val az = Math.toDegrees(kotlin.math.atan2(blip.xMm.toDouble(), blip.yMm.toDouble()))
-                "T${blip.slot + 1}  ${"%.1f".format(meters)} m  az ${az.toInt()}°  ${blip.spdCms} cm/s"
-            }
-        }
+        deck.bind(state.linkWifi, state.firstEnter, state.lastEnter, state.blips, state.rangeM)
     }
 
     private fun permissionsReady(): Boolean {

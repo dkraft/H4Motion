@@ -98,7 +98,9 @@ class RadarService : Service(), MeshCompanion.Listener {
             demoEntered = false
             demoNear = false
             linkStatus = "demo"
-            RadarHub.update { it.copy(demo = true, status = "demo on #sensemb", blips = emptyList(), alert = null) }
+            RadarHub.update {
+                it.copy(demo = true, status = "demo on #sensemb", blips = emptyList(), alert = null, linkWifi = false)
+            }
             startAsForeground("demo track")
             main.post(demoTick)
         } else {
@@ -129,7 +131,9 @@ class RadarService : Service(), MeshCompanion.Listener {
     }
 
     override fun onLinkMode(wifi: Boolean, ip: String) {
-        if (wifi && ip.isNotEmpty()) startSocket(ip) else stopSocket()
+        val useWifi = wifi && ip.isNotEmpty()
+        if (useWifi) startSocket(ip) else stopSocket()
+        if (!demo) RadarHub.update { it.copy(linkWifi = useWifi) }
     }
 
     override fun onStatus(text: String) {
@@ -161,11 +165,18 @@ class RadarService : Service(), MeshCompanion.Listener {
                     listOf(RadarHub.Blip(event.xMm, event.yMm, event.spdCms, 0)) +
                         RadarHub.state.blips.filter { it.slot != 0 }
                 }
+                val entered = if (event.kind == "ENTER") {
+                    RadarHub.EnterMark(System.currentTimeMillis(), event.meters, event.azimuthDeg)
+                } else {
+                    null
+                }
                 RadarHub.update {
                     it.copy(
                         blips = blips,
                         alert = banner,
-                        alertUntilMs = SystemClock.elapsedRealtime() + 8000L
+                        alertUntilMs = SystemClock.elapsedRealtime() + 8000L,
+                        firstEnter = if (entered != null) it.firstEnter ?: entered else it.firstEnter,
+                        lastEnter = entered ?: it.lastEnter
                     )
                 }
                 postAlert(event.kind, banner)

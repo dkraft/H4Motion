@@ -8,13 +8,19 @@ import java.util.concurrent.CopyOnWriteArrayList
 object RadarHub {
     data class Blip(val xMm: Int, val yMm: Int, val spdCms: Int, val slot: Int)
 
+    /** One ENTER, kept so the deck can show the first and the latest. */
+    data class EnterMark(val atMs: Long, val meters: Float, val azimuthDeg: Int)
+
     data class State(
         val status: String = "idle",
         val blips: List<Blip> = emptyList(),
         val alert: String? = null,
         val alertUntilMs: Long = 0L,
         val rangeM: Int = 8,
-        val demo: Boolean = false
+        val demo: Boolean = false,
+        val linkWifi: Boolean = false,
+        val firstEnter: EnterMark? = null,
+        val lastEnter: EnterMark? = null
     )
 
     @Volatile

@@ -22,36 +22,29 @@
         android:layout_height="wrap_content"
         android:layout_marginTop="8dp" />
 
+    <com.h4motion.radar.InstrumentDeck
+        android:id="@+id/deck"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp" />
+
     <TextView
         android:id="@+id/alertBanner"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="6dp"
-        android:background="#6B1515"
+        android:background="#2A140C"
         android:fontFamily="monospace"
+        android:letterSpacing="0.06"
         android:padding="8dp"
-        android:textColor="#FFE8E8"
-        android:textSize="16sp"
+        android:textColor="#FFC14D"
+        android:textSize="15sp"
         android:visibility="gone" />
 
-    <ScrollView
+    <View
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="1"
-        android:fillViewport="true"
-        android:paddingTop="6dp"
-        android:scrollbars="vertical">
-
-        <TextView
-            android:id="@+id/tracks"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:fontFamily="monospace"
-            android:gravity="top"
-            android:text="no targets"
-            android:textColor="#8FBF9A"
-            android:textSize="13sp" />
-    </ScrollView>
+        android:layout_weight="1" />
 
     <LinearLayout
         android:layout_width="match_parent"
