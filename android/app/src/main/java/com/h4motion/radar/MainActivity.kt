@@ -250,6 +250,8 @@ class MainActivity : AppCompatActivity() {
         val tint = if (high) Color.WHITE else Color.parseColor("#8DFFB0")
         view.findViewById<View>(R.id.configRoot).setBackgroundColor(bg)
         view.findViewById<TextView>(R.id.configNote).setTextColor(note)
+        view.findViewById<TextView>(R.id.wifiPassLabel).setTextColor(note)
+        view.findViewById<TextView>(R.id.adminPassLabel).setTextColor(note)
         view.findViewById<TextView>(R.id.displayLabel).setTextColor(note)
         for (id in intArrayOf(R.id.ssid, R.id.wifiPass, R.id.adminPass)) {
             view.findViewById<EditText>(id).apply {

@@ -31,15 +31,35 @@
             android:textColor="#E8FFE8"
             android:textColorHint="#6E9A7C" />
 
+        <TextView
+            android:id="@+id/wifiPassLabel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:fontFamily="monospace"
+            android:text="WiFi password"
+            android:textColor="#B7E7C7"
+            android:textSize="13sp" />
+
         <EditText
             android:id="@+id/wifiPass"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:hint="WiFi password"
             android:importantForAutofill="no"
-            android:inputType="textPassword"
+            android:inputType="textVisiblePassword"
             android:textColor="#E8FFE8"
             android:textColorHint="#6E9A7C" />
+
+        <TextView
+            android:id="@+id/adminPassLabel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:fontFamily="monospace"
+            android:text="Sensor admin"
+            android:textColor="#B7E7C7"
+            android:textSize="13sp" />
 
         <EditText
             android:id="@+id/adminPass"
@@ -47,7 +67,7 @@
             android:layout_height="wrap_content"
             android:hint="Sensor admin password"
             android:importantForAutofill="no"
-            android:inputType="textPassword"
+            android:inputType="textVisiblePassword"
             android:textColor="#E8FFE8"
             android:textColorHint="#6E9A7C" />
 
