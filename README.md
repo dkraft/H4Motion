@@ -73,7 +73,7 @@ reboot
 
 Advert position is `0,0` until you set `lat` and `lon`. The admin password is `123456`. This Heltec has no display, so that code is fixed instead of shown on a screen. Change it with `password <new>` before this node sits on a shared mesh.
 
-On a fresh board the sensor joins WiFi `BPSSI` and sends tracks there once the join succeeds. Alerts still go out on `#sensemb`. A saved `wifi` command replaces that network.
+On a fresh board the sensor joins WiFi `Starlink` and sends tracks there once the join succeeds. Alerts still go out on `#sensemb`. A saved `wifi` command replaces that network. A board that still has the old published network name is moved to `Starlink` on boot.
 
 ## Build / flash
 
@@ -103,7 +103,7 @@ The USB console accepts a command ended by Enter or Return. Serial and mesh admi
 | `link lora` | flood tracks on `#sensemb`. WiFi stays associated |
 | `link wifi` | send tracks on TCP port 4040 once the join succeeds. Alerts still flood |
 
-The passphrase is stored on the sensor and is not sent on `#sensemb`. A failed join does not switch the sensor back to LoRa. The next `link wifi` tries again. Tracks stay on LoRa until the join succeeds. The built-in network is `BPSSI`.
+The passphrase is stored on the sensor and is not sent on `#sensemb`. A failed join does not switch the sensor back to LoRa. The next `link wifi` tries again. Tracks stay on LoRa until the join succeeds. The built-in network is `Starlink`.
 
 The user button queues `rd report`. This board has no screen. The phone is the scope.
 
@@ -115,14 +115,14 @@ The user button queues `rd report`. This board has no screen. The phone is the s
 2. When Android asks, enter the companion's BLE PIN. The companion UART requires an encrypted bond. Being nearby is not enough, and this app is not the sensor.
 3. The app finds the companion Nordic UART service, joins `#sensemb` if a channel slot is free, and draws tracks. If WiFi is the saved choice, Scan asks the sensor which link it is on and opens that socket when the sensor already has an address. Otherwise it sends the saved network. If LoRa is the saved choice, Scan sends `link lora` and leaves the socket closed.
 4. **ENTER** and **NEAR** post a high-priority notification. The service stays in the foreground so that still happens with the screen covered.
-5. **Config** replaces Demo on the main row. It is filled in with WiFi `BPSSI`, the sensor admin password `123456`, and tracks on WiFi. **Normal** is the phosphor scope. **High contrast** is white on black, with near targets still red and closing targets still yellow. That choice stays on the phone and does not go out over LoRa. The LoRa and WiFi lamps follow the path that is carrying tracks, including a track that shows up on the other radio. **Demo** is inside that screen and walks a fake target without a radio. **4 m / 8 m / 16 m** changes the ring scale.
+5. **Config** replaces Demo on the main row. It is filled in with WiFi `Starlink`, the sensor admin password `123456`, and tracks on WiFi. **Normal** is the phosphor scope. **High contrast** is white on black, with near targets still red and closing targets still yellow. That choice stays on the phone and does not go out over LoRa. The LoRa and WiFi lamps follow the path that is carrying tracks, including a track that shows up on the other radio. **Demo** is inside that screen and walks a fake target without a radio. **4 m / 8 m / 16 m** changes the ring scale.
 6. Apply logs into the sensor through the companion. WiFi sends `wifi` then `link wifi`. LoRa sends only `link lora`, so the access point is left alone. That is a private CLI reply, so it can take a minute or two. The phone must be on the same LAN as the sensor for WiFi tracks. Tracks then arrive on TCP port 4040. **ENTER** and **NEAR** still arrive on `#sensemb`. The sensor stays associated when tracks move back to LoRa. The LoRa or WiFi mark in Config stays lit the next time you open it.
 
 The phone scope is a 120° wedge, the forward field of the RD-03D. The sensor is at the bottom, up is +Y, and right is +X. A return outside that wedge is drawn on the nearest edge. Closing targets are amber. Inside 2.5 m they are red.
 
 Under the wedge, amber plates show the track path (LoRa or WiFi), the first entry, the latest entry, and the closest contact. The first plate locks for the session. It fills on ENTER, on NEAR (a person who appears already inside 2.5 m), and on the first contact already in view. The latest plate moves on each later ENTER or NEAR. The contact plate follows whichever return is nearest and reads NEAR inside 2.5 m. LAT is how old that picture is. On WiFi the sensor sends the latest position 3 times a second, and the phone paints at that same pace instead of replaying a burst. Those fixes are the radar's own frame-to-frame wander, so the dot jitters. LoRa sends one of those fixes about every 3 seconds, and the dot sits on it. The measurement is the same.
 
-`make test` checks the RD-03D frame and the occupancy machine on the host. `make build` produces the Heltec image. The debug APK is `android/app/build/outputs/apk/debug/app-debug.apk` after `assembleDebug` (JDK 17, compile SDK 34). Version 0.1.9 keeps the deck lamps on the live track path. A LoRa line closes a leftover WiFi socket, and Apply sends `link` again when the lamp does not match the choice. The radar UART stays 256000 8N1. A torn 30-byte frame is dropped after a 15 ms gap, and multi-target mode is asked again after a run of bad frames. Admin password `123456`. Default WiFi `BPSSI`.
+`make test` checks the RD-03D frame and the occupancy machine on the host. `make build` produces the Heltec image. The debug APK is `android/app/build/outputs/apk/debug/app-debug.apk` after `assembleDebug` (JDK 17, compile SDK 34). Version 0.1.10 uses `Starlink` as the built-in network. Version 0.1.9 keeps the deck lamps on the live track path. A LoRa line closes a leftover WiFi socket, and Apply sends `link` again when the lamp does not match the choice. The radar UART stays 256000 8N1. A torn 30-byte frame is dropped after a 15 ms gap, and multi-target mode is asked again after a run of bad frames. Admin password `123456`. Default WiFi `Starlink`.
 
 ## Layout
 

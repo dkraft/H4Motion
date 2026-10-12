@@ -133,8 +133,9 @@ class MainActivity : AppCompatActivity() {
         val contrastMode = view.findViewById<RadioGroup>(R.id.contrastMode)
         val storedSsid = prefs.getString("ssid", null)
         val storedAdmin = prefs.getString("admin", null)
-        ssid.setText(if (storedSsid.isNullOrBlank()) "BPSSI" else storedSsid)
-        wifiPass.setText(if (storedSsid.isNullOrBlank()) "KoalaBear" else prefs.getString("wifi_pass", ""))
+        val replacingGithub = storedSsid.isNullOrBlank() || storedSsid == "BPSSI"
+        ssid.setText(if (replacingGithub) "Starlink" else storedSsid)
+        wifiPass.setText(if (replacingGithub) "******" else prefs.getString("wifi_pass", ""))
         admin.setText(if (storedAdmin.isNullOrBlank() || storedAdmin == "password") "123456" else storedAdmin)
         // Unchecking one radio leaves the group with nothing selected.
         val wantWifi = if (prefs.contains("use_wifi")) prefs.getBoolean("use_wifi", true) else true
@@ -173,7 +174,7 @@ class MainActivity : AppCompatActivity() {
             // Contrast-only Apply must not touch the radio. A lamp that does
             // not match the selected path still has to send `link`, even when
             // the saved choice was already that path.
-            if (credsSame && req.useWifi == wantWifi && req.useWifi == liveWifi) {
+            if (credsSame && !replacingGithub && req.useWifi == wantWifi && req.useWifi == liveWifi) {
                 return@setOnClickListener
             }
             val send = req.copy(linkOnly = credsSame)

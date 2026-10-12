@@ -20,8 +20,8 @@ static ChannelOut channel;
 static WifiLink wifi;
 static bool want_wifi = false;
 static const char* kPrefsPath = "/h4motion.txt";
-static const char* kDefaultSsid = "BPSSI";
-static const char* kDefaultPass = "KoalaBear";
+static const char* kDefaultSsid = "Starlink";
+static const char* kDefaultPass = "******";
 
 static const char* linkTag() {
   if (want_wifi && wifi.connected()) return "W";
@@ -301,9 +301,12 @@ void setup() {
   motion.begin(millis());
   wifi.begin();
   loadPrefs();
-  if (!wifi.hasCreds()) {
+  // The old built-in network was published in the repo. Replace that saved
+  // pair. A network the user typed themselves is left alone.
+  if (!wifi.hasCreds() || strcmp(wifi.ssid(), "BPSSI") == 0) {
     wifi.setCreds(kDefaultSsid, kDefaultPass);
     want_wifi = true;
+    savePrefs();
   }
   if (wifi.hasCreds()) wifi.connect();
   // A board that already booted still has the old compiled default saved.

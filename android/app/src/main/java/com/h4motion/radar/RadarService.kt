@@ -196,8 +196,9 @@ class RadarService : Service(), MeshCompanion.Listener {
             companion.preferLora(admin)
             return
         }
-        val ssid = if (storedSsid.isNullOrBlank()) "BPSSI" else storedSsid
-        val pass = if (storedSsid.isNullOrBlank()) "KoalaBear" else prefs.getString("wifi_pass", "").orEmpty()
+        val replacingGithub = storedSsid.isNullOrBlank() || storedSsid == "BPSSI"
+        val ssid = if (replacingGithub) "Starlink" else storedSsid.orEmpty()
+        val pass = if (replacingGithub) "******" else prefs.getString("wifi_pass", "").orEmpty()
         companion.resumeTracks(admin, ssid, pass)
     }
 
