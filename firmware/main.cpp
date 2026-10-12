@@ -21,7 +21,6 @@ static WifiLink wifi;
 static bool want_wifi = false;
 static const char* kPrefsPath = "/h4motion.txt";
 static const char* kDefaultSsid = "Starlink";
-static const char* kDefaultPass = "******";
 
 static const char* linkTag() {
   if (want_wifi && wifi.connected()) return "W";
@@ -157,6 +156,12 @@ protected:
       }
       if (args.status_only) {
         replyWifiStatus(reply);
+        return true;
+      }
+      // A short passphrase must not replace one that is already stored.
+      if (!wifiPassUsable(args.pass)) {
+        memset(args.pass, 0, sizeof(args.pass));
+        strcpy(reply, "wifi bad");
         return true;
       }
       if (!wifi.setCreds(args.ssid, args.pass)) {
@@ -301,14 +306,31 @@ void setup() {
   motion.begin(millis());
   wifi.begin();
   loadPrefs();
-  // The old built-in network was published in the repo. Replace that saved
-  // pair. A network the user typed themselves is left alone.
-  if (!wifi.hasCreds() || strcmp(wifi.ssid(), "BPSSI") == 0) {
-    wifi.setCreds(kDefaultSsid, kDefaultPass);
-    want_wifi = true;
-    savePrefs();
+  // Rename the old published network. A passphrase under 8 characters cannot
+  // join WPA, so drop it instead of dialing it on every boot.
+  {
+    char ssid[33];
+    char pass[64];
+    ssid[0] = 0;
+    pass[0] = 0;
+    if (wifi.hasCreds()) {
+      strncpy(ssid, wifi.ssid(), sizeof(ssid) - 1);
+      ssid[sizeof(ssid) - 1] = 0;
+      wifi.copyPass(pass, sizeof(pass));
+    }
+    bool legacy = strcmp(ssid, "BPSSI") == 0;
+    bool short_pass = pass[0] != 0 && !wifiPassUsable(pass);
+    if (!wifi.hasCreds() || legacy || short_pass) {
+      const char* name = (ssid[0] == 0 || legacy) ? kDefaultSsid : ssid;
+      if (short_pass) pass[0] = 0;
+      wifi.setCreds(name, pass);
+      if (pass[0] == 0) want_wifi = false;
+      savePrefs();
+    }
+    bool join = pass[0] == 0 ? want_wifi : wifiPassUsable(pass);
+    memset(pass, 0, sizeof(pass));
+    if (wifi.hasCreds() && join) wifi.connect();
   }
-  if (wifi.hasCreds()) wifi.connect();
   // A board that already booted still has the old compiled default saved.
   NodePrefs* prefs = the_mesh.getNodePrefs();
   if (prefs->password[0] == 0 || strcmp(prefs->password, "password") == 0) {

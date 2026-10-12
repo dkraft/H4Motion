@@ -15,6 +15,13 @@ struct WifiArgs {
   bool status_only;
 };
 
+// Empty is an open network. WPA rejects a passphrase shorter than 8 characters.
+inline bool wifiPassUsable(const char* pass) {
+  if (pass == NULL || pass[0] == 0) return true;
+  size_t n = strlen(pass);
+  return n >= 8 && n <= 63;
+}
+
 inline bool wifiTakeToken(char*& p, char* dest, size_t n) {
   while (*p == ' ') p++;
   size_t i = 0;

@@ -65,6 +65,14 @@ void WifiLink::dropClients() {
 
 void WifiLink::connect() {
   if (_ssid[0] == 0) return;
+  // WPA will not associate with a 1..7 character passphrase. Fail here so
+  // the join timer does not sit for 40 s on a password that cannot work.
+  size_t pass_n = strlen(_pass);
+  if (pass_n > 0 && pass_n < 8) {
+    _state = FAIL;
+    _ip[0] = 0;
+    return;
+  }
   dropClients();
   if (!_radio_up) {
     WiFi.persistent(false);

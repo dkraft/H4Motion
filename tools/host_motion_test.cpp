@@ -267,6 +267,11 @@ static void testWifiArgs() {
   long_pass[68] = 0;
   check(parseWifiCommand(long_pass, &args) && strlen(args.pass) == 63, "63-byte passphrase is accepted");
   check(!parseWifiCommand("home bad\"quote", &args), "quote in passphrase is rejected");
+  check(wifiPassUsable(""), "empty passphrase is an open network");
+  check(wifiPassUsable(NULL), "missing passphrase is an open network");
+  check(!wifiPassUsable("******"), "6-character passphrase cannot join WPA");
+  check(!wifiPassUsable("1234567"), "7-character passphrase cannot join WPA");
+  check(wifiPassUsable("12345678"), "8-character passphrase can join WPA");
 }
 
 int main() {

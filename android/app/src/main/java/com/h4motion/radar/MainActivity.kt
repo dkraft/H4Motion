@@ -132,10 +132,14 @@ class MainActivity : AppCompatActivity() {
         val linkMode = view.findViewById<RadioGroup>(R.id.linkMode)
         val contrastMode = view.findViewById<RadioGroup>(R.id.contrastMode)
         val storedSsid = prefs.getString("ssid", null)
+        val storedPass = prefs.getString("wifi_pass", "").orEmpty()
         val storedAdmin = prefs.getString("admin", null)
-        val replacingGithub = storedSsid.isNullOrBlank() || storedSsid == "BPSSI"
-        ssid.setText(if (replacingGithub) "Starlink" else storedSsid)
-        wifiPass.setText(if (replacingGithub) "******" else prefs.getString("wifi_pass", ""))
+        // The old published name is shown as Starlink. The saved passphrase
+        // stays as typed. Substituting a placeholder here made Apply look
+        // like it had forgotten the password.
+        val replacingName = storedSsid.isNullOrBlank() || storedSsid == "BPSSI"
+        ssid.setText(if (replacingName) "Starlink" else storedSsid)
+        wifiPass.setText(storedPass)
         admin.setText(if (storedAdmin.isNullOrBlank() || storedAdmin == "password") "123456" else storedAdmin)
         // Unchecking one radio leaves the group with nothing selected.
         val wantWifi = if (prefs.contains("use_wifi")) prefs.getBoolean("use_wifi", true) else true
@@ -168,16 +172,22 @@ class MainActivity : AppCompatActivity() {
                 .putString("admin", req.admin)
                 .putBoolean("use_wifi", req.useWifi)
                 .putBoolean("high_contrast", high)
-                .apply()
+                .commit()
             applyContrast(high)
             dialog.dismiss()
-            // Contrast-only Apply must not touch the radio. A lamp that does
-            // not match the selected path still has to send `link`, even when
-            // the saved choice was already that path.
-            if (credsSame && !replacingGithub && req.useWifi == wantWifi && req.useWifi == liveWifi) {
+            if (req.useWifi && req.wifiPass.isNotEmpty() && req.wifiPass.length < 8) {
+                status.text = "H4Motion  #sensemb  WiFi password needs 8 characters"
                 return@setOnClickListener
             }
-            val send = req.copy(linkOnly = credsSame)
+            // Contrast-only Apply must not touch the radio. A lamp that does
+            // not match the selected path still has to send `link`, even when
+            // the saved choice was already that path. A WiFi choice that is
+            // not up yet resends the passphrase. `link` alone cannot repair a
+            // password the sensor never stored.
+            if (credsSame && !replacingName && req.useWifi == wantWifi && req.useWifi == liveWifi) {
+                return@setOnClickListener
+            }
+            val send = req.copy(linkOnly = credsSame && liveWifi && req.useWifi && !replacingName)
             pendingScan = false
             pendingDemo = false
             pendingConfig = send
