@@ -838,7 +838,7 @@ class MeshCompanion(
                     return@done
                 }
                 if (ssid.isNotEmpty()) {
-                    listener.onStatus("saving WiFi over LoRa")
+                    listener.onStatus("saving WiFi $ssid")
                     sendCli(gen, wifiCommand(ssid, wifiPass)) { reply ->
                         if (reply.startsWith("wifi bad")) {
                             failConfig("WiFi credentials rejected")
@@ -894,7 +894,11 @@ class MeshCompanion(
             else -> {
                 configBusy = false
                 if (useWifi) {
-                    listener.onStatus("WiFi did not join")
+                    val failed = reply.removePrefix("wifi fail").trim()
+                    listener.onStatus(
+                        if (failed.isEmpty()) "WiFi did not join (2.4 GHz only)"
+                        else "WiFi did not join $failed (2.4 GHz only)"
+                    )
                     listener.onLinkMode(false, "")
                 } else {
                     // Do not paint LoRa until a reply or a LoRa track says so.
@@ -932,7 +936,7 @@ class MeshCompanion(
             reply.startsWith("link wait") -> sendLink(gen, true, LINK_WAIT_POLLS)
             reply.startsWith("link lora") && ip != null -> sendLink(gen, true, LINK_WAIT_POLLS)
             ssid.isNotEmpty() -> {
-                listener.onStatus("saving WiFi over LoRa")
+                listener.onStatus("saving WiFi $ssid")
                 sendCli(gen, wifiCommand(ssid, wifiPass)) { wr ->
                     if (!sameConfig(gen)) return@sendCli
                     if (wr.startsWith("wifi bad")) {

@@ -16,7 +16,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:fontFamily="monospace"
-            android:text="SSID and password go out as a private admin command. They are not sent on #sensemb. Apply can take a minute or two over LoRa. The WiFi password needs 8 characters. Display changes on this phone only."
+            android:text="Type the 2.4 GHz network name. This radio cannot see 5 GHz. The name and password go out as a private admin command and are not sent on #sensemb. Apply can take a minute or two over LoRa. The WiFi password needs 8 characters. Display changes on this phone only."
             android:textColor="#B7E7C7"
             android:textSize="13sp" />
 
@@ -25,7 +25,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="12dp"
-            android:hint="WiFi SSID"
+            android:hint="2.4 GHz WiFi name"
             android:importantForAutofill="no"
             android:inputType="text"
             android:textColor="#E8FFE8"

@@ -13,6 +13,7 @@ public:
 
   void begin();
   bool setCreds(const char* ssid, const char* pass);
+  void clearCreds();
   bool hasCreds() const { return _ssid[0] != 0; }
   const char* ssid() const { return _ssid; }
   void copyPass(char* dest, size_t n) const;

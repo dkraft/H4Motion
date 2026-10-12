@@ -196,9 +196,12 @@ class RadarService : Service(), MeshCompanion.Listener {
             companion.preferLora(admin)
             return
         }
-        val replacingName = storedSsid.isNullOrBlank() || storedSsid == "BPSSI"
-        val ssid = if (replacingName) "Starlink" else storedSsid.orEmpty()
+        val ssid = if (storedSsid.isNullOrBlank() || storedSsid == "BPSSI") "" else storedSsid
         val pass = prefs.getString("wifi_pass", "").orEmpty()
+        if (ssid.isEmpty()) {
+            onStatus("WiFi name is not set")
+            return
+        }
         companion.resumeTracks(admin, ssid, pass)
     }
 

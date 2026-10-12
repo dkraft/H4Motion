@@ -44,6 +44,13 @@ bool WifiLink::setCreds(const char* ssid, const char* pass) {
   return true;
 }
 
+void WifiLink::clearCreds() {
+  _ssid[0] = 0;
+  _pass[0] = 0;
+  _ip[0] = 0;
+  _state = IDLE;
+}
+
 void WifiLink::copyPass(char* dest, size_t n) const {
   if (n == 0) return;
   strncpy(dest, _pass, n - 1);
@@ -74,18 +81,28 @@ void WifiLink::connect() {
     return;
   }
   dropClients();
+  WiFi.persistent(false);
   if (!_radio_up) {
-    WiFi.persistent(false);
     WiFi.mode(WIFI_STA);
-    WiFi.setAutoReconnect(true);
     WiFi.setSleep(false);
     _radio_up = true;
   }
+  // FAST_SCAN stops at the first hit and misses the access point when it is
+  // not on channel 1. This radio only hears 2.4 GHz.
+  WiFi.setScanMethod(WIFI_ALL_CHANNEL_SCAN);
+  WiFi.setSortMethod(WIFI_CONNECT_AP_BY_SIGNAL);
   _state = CONNECTING;
   _ip[0] = 0;
   _started_ms = millis();
-  WiFi.disconnect(false, false);
-  WiFi.begin(_ssid, _pass);
+  // Do not call disconnect() first. begin() disconnects when the SSID
+  // changes, and a disconnect already in progress makes it return before
+  // the new name is stored. The previous name then stays in the driver.
+  wl_status_t st = WiFi.begin(_ssid, _pass);
+  if (st == WL_CONNECT_FAILED) {
+    delay(100);
+    st = WiFi.begin(_ssid, _pass);
+  }
+  if (st == WL_CONNECT_FAILED) _state = FAIL;
 }
 
 void WifiLink::noteIp() {

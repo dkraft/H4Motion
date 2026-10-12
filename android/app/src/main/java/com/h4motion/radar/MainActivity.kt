@@ -134,11 +134,10 @@ class MainActivity : AppCompatActivity() {
         val storedSsid = prefs.getString("ssid", null)
         val storedPass = prefs.getString("wifi_pass", "").orEmpty()
         val storedAdmin = prefs.getString("admin", null)
-        // The old published name is shown as Starlink. The saved passphrase
-        // stays as typed. Substituting a placeholder here made Apply look
-        // like it had forgotten the password.
-        val replacingName = storedSsid.isNullOrBlank() || storedSsid == "BPSSI"
-        ssid.setText(if (replacingName) "Starlink" else storedSsid)
+        // Show the saved name. A blank field stays blank. Filling "Starlink"
+        // here made that word stick and the radio kept joining it.
+        val showSsid = if (storedSsid.isNullOrBlank() || storedSsid == "BPSSI") "" else storedSsid
+        ssid.setText(showSsid)
         wifiPass.setText(storedPass)
         admin.setText(if (storedAdmin.isNullOrBlank() || storedAdmin == "password") "123456" else storedAdmin)
         // Unchecking one radio leaves the group with nothing selected.
@@ -184,10 +183,14 @@ class MainActivity : AppCompatActivity() {
             // the saved choice was already that path. A WiFi choice that is
             // not up yet resends the passphrase. `link` alone cannot repair a
             // password the sensor never stored.
-            if (credsSame && !replacingName && req.useWifi == wantWifi && req.useWifi == liveWifi) {
+            if (req.useWifi && req.ssid.isBlank()) {
+                status.text = "H4Motion  #sensemb  WiFi name is not set"
                 return@setOnClickListener
             }
-            val send = req.copy(linkOnly = credsSame && liveWifi && req.useWifi && !replacingName)
+            if (credsSame && req.useWifi == wantWifi && req.useWifi == liveWifi) {
+                return@setOnClickListener
+            }
+            val send = req.copy(linkOnly = credsSame && liveWifi && req.useWifi)
             pendingScan = false
             pendingDemo = false
             pendingConfig = send

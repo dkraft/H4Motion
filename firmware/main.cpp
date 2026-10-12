@@ -20,7 +20,7 @@ static ChannelOut channel;
 static WifiLink wifi;
 static bool want_wifi = false;
 static const char* kPrefsPath = "/h4motion.txt";
-static const char* kDefaultSsid = "Starlink";
+
 
 static const char* linkTag() {
   if (want_wifi && wifi.connected()) return "W";
@@ -39,7 +39,7 @@ static void replyWifiStatus(char* reply) {
 static void replyLinkStatus(char* reply) {
   if (want_wifi && wifi.connected()) snprintf(reply, 48, "link wifi %s", wifi.ip());
   else if (want_wifi && wifi.connecting()) strcpy(reply, "link wait");
-  else if (want_wifi && wifi.failed()) strcpy(reply, "wifi fail");
+  else if (want_wifi && wifi.failed()) snprintf(reply, 48, "wifi fail %s", wifi.ssid());
   else if (wifi.connected()) snprintf(reply, 48, "link lora %s", wifi.ip());
   else strcpy(reply, "link lora");
 }
@@ -306,8 +306,8 @@ void setup() {
   motion.begin(millis());
   wifi.begin();
   loadPrefs();
-  // Rename the old published network. A passphrase under 8 characters cannot
-  // join WPA, so drop it instead of dialing it on every boot.
+  // Do not invent a network name. A short passphrase cannot join, and the
+  // old placeholder name is dropped only when it has no real passphrase.
   {
     char ssid[33];
     char pass[64];
@@ -318,14 +318,19 @@ void setup() {
       ssid[sizeof(ssid) - 1] = 0;
       wifi.copyPass(pass, sizeof(pass));
     }
-    bool legacy = strcmp(ssid, "BPSSI") == 0;
+    bool drop_name = strcmp(ssid, "BPSSI") == 0;
+    if (strcmp(ssid, "Starlink") == 0 && (pass[0] == 0 || !wifiPassUsable(pass))) drop_name = true;
     bool short_pass = pass[0] != 0 && !wifiPassUsable(pass);
-    if (!wifi.hasCreds() || legacy || short_pass) {
-      const char* name = (ssid[0] == 0 || legacy) ? kDefaultSsid : ssid;
-      if (short_pass) pass[0] = 0;
-      wifi.setCreds(name, pass);
-      if (pass[0] == 0) want_wifi = false;
+    if (drop_name) {
+      wifi.clearCreds();
+      want_wifi = false;
       savePrefs();
+      pass[0] = 0;
+    } else if (short_pass) {
+      wifi.setCreds(ssid, "");
+      want_wifi = false;
+      savePrefs();
+      pass[0] = 0;
     }
     bool join = pass[0] == 0 ? want_wifi : wifiPassUsable(pass);
     memset(pass, 0, sizeof(pass));
