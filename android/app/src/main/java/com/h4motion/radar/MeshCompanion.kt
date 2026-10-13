@@ -177,12 +177,8 @@ class MeshCompanion(
             listener.onStatus("BLE MTU $mtu is too small for sensor setup")
             return
         }
-        // An empty, short, or retired passphrase must not be written over the sensor.
-        // Scan used to do that with the placeholder, which wiped a real one.
-        if (RetiredWifi.passOrStars(wifiPass)) {
-            listener.onStatus("type the WiFi password")
-            return
-        }
+        // An empty or short passphrase must not be written over the sensor.
+        // Scan used to do that with a placeholder, which wiped a real one.
         if (wifiPass.length < 8) {
             listener.onStatus("WiFi password needs 8 characters")
             return
@@ -1225,7 +1221,6 @@ class MeshCompanion(
             }
             val ssidBytes = ssid.toByteArray(Charsets.UTF_8)
             val passBytes = wifiPass.toByteArray(Charsets.UTF_8)
-            if (RetiredWifi.passOrStars(wifiPass)) return "type the WiFi password"
             if (wifiPass.isNotEmpty() && wifiPass.length < 8) return "WiFi password needs 8 characters"
             if (ssidBytes.size > 32 || passBytes.size > 63) return "SSID or password is too long"
             if (ssid.any { it < ' ' || it == '"' } || wifiPass.any { it < ' ' || it == '"' }) {

@@ -180,39 +180,20 @@ class RadarService : Service(), MeshCompanion.Listener {
     }
 
     private fun lampMatchesSaved(): Boolean {
-        val prefs = getSharedPreferences("h4motion", MODE_PRIVATE)
-        val want = if (prefs.contains("use_wifi")) prefs.getBoolean("use_wifi", true) else true
-        return RadarHub.state.linkWifi == want
+        return RadarHub.state.linkWifi == PhoneConfig.load(this).useWifi
     }
 
-    /** Saved Config choice. A missing preference means WiFi, same as the dialog. */
+    /** Saved Config choice. Does not rewrite that choice. */
     private fun resumeWifi() {
-        val prefs = getSharedPreferences("h4motion", MODE_PRIVATE)
-        val want = if (prefs.contains("use_wifi")) prefs.getBoolean("use_wifi", true) else true
-        val storedSsid = prefs.getString("ssid", null)
-        val storedAdmin = prefs.getString("admin", null)
-        val admin = if (storedAdmin.isNullOrBlank() || storedAdmin == "password") "123456" else storedAdmin
-        if (!want) {
-            companion.preferLora(admin)
+        val saved = PhoneConfig.load(this)
+        if (!saved.useWifi) {
+            companion.preferLora(saved.admin)
             return
         }
-        val storedPass = prefs.getString("wifi_pass", "").orEmpty()
-        val (ssid, pass) = RetiredWifi.shown(storedSsid, storedPass)
-        if (ssid != storedSsid.orEmpty() || pass != storedPass) {
-            prefs.edit().putString("ssid", ssid).putString("wifi_pass", pass).commit()
-        }
-        if (ssid.isEmpty()) {
-            onStatus("WiFi name is not set")
-            return
-        }
-        if (RetiredWifi.passOrStars(pass) || pass.length < 8) {
-            onStatus(
-                if (RetiredWifi.passOrStars(pass)) "type the WiFi password"
-                else "WiFi password needs 8 characters"
-            )
-            return
-        }
-        companion.resumeTracks(admin, ssid, pass)
+        // An empty name or a short passphrase stays on the phone until Apply
+        // fixes it. Scan must not erase it or replace a live LoRa status.
+        if (saved.ssid.isEmpty() || saved.wifiPass.length < 8) return
+        companion.resumeTracks(saved.admin, saved.ssid, saved.wifiPass)
     }
 
     override fun onChannelText(text: String) {

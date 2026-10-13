@@ -124,52 +124,34 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showConfig() {
-        val prefs = getSharedPreferences("h4motion", MODE_PRIVATE)
+        val saved = PhoneConfig.load(this)
         val view = layoutInflater.inflate(R.layout.dialog_config, null)
         val ssid = view.findViewById<EditText>(R.id.ssid)
         val wifiPass = view.findViewById<EditText>(R.id.wifiPass)
         val admin = view.findViewById<EditText>(R.id.adminPass)
         val linkMode = view.findViewById<RadioGroup>(R.id.linkMode)
         val contrastMode = view.findViewById<RadioGroup>(R.id.contrastMode)
-        val storedSsid = prefs.getString("ssid", null)
-        val storedPass = prefs.getString("wifi_pass", "").orEmpty()
-        val storedAdmin = prefs.getString("admin", null)
-        // Show the saved name. A blank field stays blank. The old filled-in
-        // name is cleared here so Apply cannot store it again.
-        val (showSsid, showPass) = RetiredWifi.shown(storedSsid, storedPass)
-        if (showSsid != storedSsid.orEmpty() || showPass != storedPass) {
-            prefs.edit()
-                .putString("ssid", showSsid)
-                .putString("wifi_pass", showPass)
-                .commit()
-        }
-        ssid.setText(showSsid)
-        wifiPass.setText(showPass)
-        admin.setText(if (storedAdmin.isNullOrBlank() || storedAdmin == "password") "123456" else storedAdmin)
+        // The fields are the last Apply. Opening this screen does not edit them.
+        ssid.setText(saved.ssid)
+        wifiPass.setText(saved.wifiPass)
+        admin.setText(saved.admin)
         // Unchecking one radio leaves the group with nothing selected.
-        val wantWifi = if (prefs.contains("use_wifi")) prefs.getBoolean("use_wifi", true) else true
-        linkMode.check(if (wantWifi) R.id.modeWifi else R.id.modeLora)
-        val initialContrast = highContrast()
-        contrastMode.check(if (initialContrast) R.id.contrastHigh else R.id.contrastNormal)
+        linkMode.check(if (saved.useWifi) R.id.modeWifi else R.id.modeLora)
+        contrastMode.check(if (saved.highContrast) R.id.contrastHigh else R.id.contrastNormal)
         val initialAdmin = admin.text.toString()
         val initialSsid = ssid.text.toString()
         val initialPass = wifiPass.text.toString()
-        paintConfig(view, initialContrast)
+        val wantWifi = saved.useWifi
+        paintConfig(view, saved.highContrast)
         contrastMode.setOnCheckedChangeListener { _, checkedId ->
             paintConfig(view, checkedId == R.id.contrastHigh)
         }
         val dialog = AlertDialog.Builder(this).setView(view).create()
         view.findViewById<Button>(R.id.btnApply).setOnClickListener {
-            val typedSsid = ssid.text.toString()
-            val typedPass = wifiPass.text.toString()
-            // The old passphrase must not be written back over a name the user typed.
-            val retired = RetiredWifi.passOrStars(typedPass)
-            val saveSsid = if (retired && typedSsid == "Starlink") "" else typedSsid
-            val savePass = if (retired) "" else typedPass
             val req = ConfigRequest(
-                admin.text.toString(),
-                saveSsid,
-                savePass,
+                admin.text.toString().ifBlank { "123456" },
+                ssid.text.toString(),
+                wifiPass.text.toString(),
                 linkMode.checkedRadioButtonId == R.id.modeWifi
             )
             val high = contrastMode.checkedRadioButtonId == R.id.contrastHigh
@@ -177,18 +159,14 @@ class MainActivity : AppCompatActivity() {
                 req.ssid == initialSsid &&
                 req.wifiPass == initialPass
             val liveWifi = RadarHub.state.linkWifi
-            prefs.edit()
-                .putString("ssid", req.ssid)
-                .putString("wifi_pass", req.wifiPass)
-                .putString("admin", req.admin)
-                .putBoolean("use_wifi", req.useWifi)
-                .putBoolean("high_contrast", high)
-                .commit()
+            PhoneConfig.save(
+                this,
+                PhoneConfig(req.ssid, req.wifiPass, req.admin, req.useWifi, high)
+            )
             applyContrast(high)
             dialog.dismiss()
-            if (req.useWifi && retired) {
-                val why = if (req.ssid.isBlank()) "WiFi name is not set" else "type the WiFi password"
-                RadarHub.update { it.copy(status = why) }
+            if (req.useWifi && req.ssid.isBlank()) {
+                RadarHub.update { it.copy(status = "WiFi name is not set") }
                 return@setOnClickListener
             }
             if (req.useWifi && req.wifiPass.isNotEmpty() && req.wifiPass.length < 8) {
@@ -200,10 +178,6 @@ class MainActivity : AppCompatActivity() {
             // the saved choice was already that path. A WiFi choice that is
             // not up yet resends the passphrase. `link` alone cannot repair a
             // password the sensor never stored.
-            if (req.useWifi && req.ssid.isBlank()) {
-                RadarHub.update { it.copy(status = "WiFi name is not set") }
-                return@setOnClickListener
-            }
             if (credsSame && req.useWifi == wantWifi && req.useWifi == liveWifi) {
                 return@setOnClickListener
             }
@@ -248,9 +222,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun highContrast(): Boolean {
-        return getSharedPreferences("h4motion", MODE_PRIVATE).getBoolean("high_contrast", false)
-    }
+    private fun highContrast(): Boolean = PhoneConfig.load(this).highContrast
 
     /** Normal keeps the phosphor colors. High contrast is white on black. */
     private fun applyContrast(high: Boolean) {

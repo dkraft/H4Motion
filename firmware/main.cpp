@@ -5,8 +5,6 @@
 #include "WifiArgs.h"
 #include "WifiLink.h"
 
-#include <mbedtls/sha256.h>
-
 #ifdef DISPLAY_CLASS
   #include "UITask.h"
   static UITask ui_task(display);
@@ -28,21 +26,6 @@ static const char* linkTag() {
   if (want_wifi && wifi.connected()) return "W";
   if (want_wifi) return "w";
   return "L";
-}
-
-// SHA-256 of the passphrase that used to be filled in automatically.
-// Compared by hash so that text is not stored in the image.
-static bool retiredWifiPass(const char* pass) {
-  static const uint8_t kOld[32] = {
-    0xd1, 0x19, 0x4a, 0x3f, 0x12, 0xf8, 0x99, 0x15,
-    0x20, 0x9b, 0xe4, 0xe1, 0xe8, 0x97, 0x2a, 0xea,
-    0x4b, 0xa9, 0xfe, 0x4b, 0x0d, 0xcc, 0x9e, 0x3b,
-    0xd9, 0x86, 0xa1, 0xd9, 0x86, 0x9c, 0x85, 0xec
-  };
-  if (pass == NULL || pass[0] == 0) return false;
-  uint8_t dig[32];
-  if (mbedtls_sha256_ret((const unsigned char*)pass, strlen(pass), dig, 0) != 0) return false;
-  return memcmp(dig, kOld, 32) == 0;
 }
 
 static void replyWifiStatus(char* reply) {
@@ -175,8 +158,8 @@ protected:
         replyWifiStatus(reply);
         return true;
       }
-      // A short or retired passphrase must not replace one that is already stored.
-      if (!wifiPassUsable(args.pass) || retiredWifiPass(args.pass)) {
+      // A short passphrase must not replace one that is already stored.
+      if (!wifiPassUsable(args.pass)) {
         memset(args.pass, 0, sizeof(args.pass));
         strcpy(reply, "wifi bad");
         return true;
@@ -323,8 +306,9 @@ void setup() {
   motion.begin(millis());
   wifi.begin();
   loadPrefs();
-  // Do not invent a network name. A short passphrase cannot join, and the
-  // old placeholder name is dropped only when it has no real passphrase.
+  // Do not invent a network name. Drop only the old compiled name BPSSI.
+  // A short passphrase cannot join, so it is dropped and tracks stay on LoRa.
+  // Any other saved name and passphrase stay as the user stored them.
   {
     char ssid[33];
     char pass[64];
@@ -335,10 +319,8 @@ void setup() {
       ssid[sizeof(ssid) - 1] = 0;
       wifi.copyPass(pass, sizeof(pass));
     }
-    bool retired = retiredWifiPass(pass);
     bool drop_name = strcmp(ssid, "BPSSI") == 0;
-    if (strcmp(ssid, "Starlink") == 0 && (pass[0] == 0 || !wifiPassUsable(pass) || retired)) drop_name = true;
-    bool short_pass = (pass[0] != 0 && !wifiPassUsable(pass)) || retired;
+    bool short_pass = pass[0] != 0 && !wifiPassUsable(pass);
     if (drop_name) {
       wifi.clearCreds();
       want_wifi = false;

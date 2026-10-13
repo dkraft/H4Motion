@@ -17,7 +17,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:fontFamily="monospace"
-            android:text="Type the 2.4 GHz network name. The name in this box is the name that is saved. This radio cannot see 5 GHz. The name and password go out as a private admin command and are not sent on #sensemb. Apply can take a minute or two over LoRa. The WiFi password needs 8 characters. Display changes on this phone only."
+            android:text="Apply saves the name and password in this box. The next time you open Config, those saved values are here. Type the 2.4 GHz network name. This radio cannot see 5 GHz. The name and password go out as a private admin command and are not sent on #sensemb. Apply can take a minute or two over LoRa. The WiFi password needs 8 characters. Display changes on this phone only."
             android:textColor="#B7E7C7"
             android:textSize="13sp" />
 
