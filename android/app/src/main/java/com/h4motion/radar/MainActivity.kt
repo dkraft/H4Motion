@@ -134,11 +134,17 @@ class MainActivity : AppCompatActivity() {
         val storedSsid = prefs.getString("ssid", null)
         val storedPass = prefs.getString("wifi_pass", "").orEmpty()
         val storedAdmin = prefs.getString("admin", null)
-        // Show the saved name. A blank field stays blank. Filling "Starlink"
-        // here made that word stick and the radio kept joining it.
-        val showSsid = if (storedSsid.isNullOrBlank() || storedSsid == "BPSSI") "" else storedSsid
+        // Show the saved name. A blank field stays blank. The old filled-in
+        // name is cleared here so Apply cannot store it again.
+        val (showSsid, showPass) = RetiredWifi.shown(storedSsid, storedPass)
+        if (showSsid != storedSsid.orEmpty() || showPass != storedPass) {
+            prefs.edit()
+                .putString("ssid", showSsid)
+                .putString("wifi_pass", showPass)
+                .commit()
+        }
         ssid.setText(showSsid)
-        wifiPass.setText(storedPass)
+        wifiPass.setText(showPass)
         admin.setText(if (storedAdmin.isNullOrBlank() || storedAdmin == "password") "123456" else storedAdmin)
         // Unchecking one radio leaves the group with nothing selected.
         val wantWifi = if (prefs.contains("use_wifi")) prefs.getBoolean("use_wifi", true) else true
@@ -154,10 +160,16 @@ class MainActivity : AppCompatActivity() {
         }
         val dialog = AlertDialog.Builder(this).setView(view).create()
         view.findViewById<Button>(R.id.btnApply).setOnClickListener {
+            val typedSsid = ssid.text.toString()
+            val typedPass = wifiPass.text.toString()
+            // The old passphrase must not be written back over a name the user typed.
+            val retired = RetiredWifi.passOrStars(typedPass)
+            val saveSsid = if (retired && typedSsid == "Starlink") "" else typedSsid
+            val savePass = if (retired) "" else typedPass
             val req = ConfigRequest(
                 admin.text.toString(),
-                ssid.text.toString(),
-                wifiPass.text.toString(),
+                saveSsid,
+                savePass,
                 linkMode.checkedRadioButtonId == R.id.modeWifi
             )
             val high = contrastMode.checkedRadioButtonId == R.id.contrastHigh
@@ -174,8 +186,13 @@ class MainActivity : AppCompatActivity() {
                 .commit()
             applyContrast(high)
             dialog.dismiss()
+            if (req.useWifi && retired) {
+                val why = if (req.ssid.isBlank()) "WiFi name is not set" else "type the WiFi password"
+                RadarHub.update { it.copy(status = why) }
+                return@setOnClickListener
+            }
             if (req.useWifi && req.wifiPass.isNotEmpty() && req.wifiPass.length < 8) {
-                status.text = "H4Motion  #sensemb  WiFi password needs 8 characters"
+                RadarHub.update { it.copy(status = "WiFi password needs 8 characters") }
                 return@setOnClickListener
             }
             // Contrast-only Apply must not touch the radio. A lamp that does
@@ -184,13 +201,16 @@ class MainActivity : AppCompatActivity() {
             // not up yet resends the passphrase. `link` alone cannot repair a
             // password the sensor never stored.
             if (req.useWifi && req.ssid.isBlank()) {
-                status.text = "H4Motion  #sensemb  WiFi name is not set"
+                RadarHub.update { it.copy(status = "WiFi name is not set") }
                 return@setOnClickListener
             }
             if (credsSame && req.useWifi == wantWifi && req.useWifi == liveWifi) {
                 return@setOnClickListener
             }
             val send = req.copy(linkOnly = credsSame && liveWifi && req.useWifi)
+            if (req.useWifi) {
+                RadarHub.update { it.copy(status = "saved WiFi ${req.ssid}") }
+            }
             pendingScan = false
             pendingDemo = false
             pendingConfig = send
@@ -204,6 +224,7 @@ class MainActivity : AppCompatActivity() {
             dialog.dismiss()
             requestAction(scan = false)
         }
+        dialog.window?.decorView?.importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
         dialog.show()
     }
 
@@ -263,6 +284,7 @@ class MainActivity : AppCompatActivity() {
         val tint = if (high) Color.WHITE else Color.parseColor("#8DFFB0")
         view.findViewById<View>(R.id.configRoot).setBackgroundColor(bg)
         view.findViewById<TextView>(R.id.configNote).setTextColor(note)
+        view.findViewById<TextView>(R.id.ssidLabel).setTextColor(note)
         view.findViewById<TextView>(R.id.wifiPassLabel).setTextColor(note)
         view.findViewById<TextView>(R.id.adminPassLabel).setTextColor(note)
         view.findViewById<TextView>(R.id.displayLabel).setTextColor(note)

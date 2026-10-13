@@ -196,10 +196,20 @@ class RadarService : Service(), MeshCompanion.Listener {
             companion.preferLora(admin)
             return
         }
-        val ssid = if (storedSsid.isNullOrBlank() || storedSsid == "BPSSI") "" else storedSsid
-        val pass = prefs.getString("wifi_pass", "").orEmpty()
+        val storedPass = prefs.getString("wifi_pass", "").orEmpty()
+        val (ssid, pass) = RetiredWifi.shown(storedSsid, storedPass)
+        if (ssid != storedSsid.orEmpty() || pass != storedPass) {
+            prefs.edit().putString("ssid", ssid).putString("wifi_pass", pass).commit()
+        }
         if (ssid.isEmpty()) {
             onStatus("WiFi name is not set")
+            return
+        }
+        if (RetiredWifi.passOrStars(pass) || pass.length < 8) {
+            onStatus(
+                if (RetiredWifi.passOrStars(pass)) "type the WiFi password"
+                else "WiFi password needs 8 characters"
+            )
             return
         }
         companion.resumeTracks(admin, ssid, pass)
