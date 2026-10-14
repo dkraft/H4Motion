@@ -827,8 +827,12 @@ class MeshCompanion(
                     return@done
                 }
                 if (queryOnly) {
-                    listener.onStatus("asking which link the sensor is using")
-                    sendCli(gen, "link") { reply ->
+                    // A lost `link` reply used to sit here until the attempt
+                    // failed, so the saved network was never sent.
+                    listener.onStatus("switching to WiFi $ssid")
+                    sendCli(gen, "link", triesLeft = 1, timeoutMs = 12_000, onGiveUp = {
+                        handleLinkQuery(gen, ssid, wifiPass, "", LINK_WAIT_POLLS)
+                    }) { reply ->
                         handleLinkQuery(gen, ssid, wifiPass, reply, LINK_WAIT_POLLS)
                     }
                     return@done
@@ -962,6 +966,7 @@ class MeshCompanion(
         command: String,
         triesLeft: Int = 0,
         timeoutMs: Long = 90_000,
+        onGiveUp: (() -> Unit)? = null,
         onReply: (String) -> Unit
     ) {
         send(cliFrame(command), setOf(SENT, ERR)) { frame ->
@@ -982,7 +987,9 @@ class MeshCompanion(
                 cliTimeout = null
                 if (triesLeft > 0) {
                     listener.onStatus("no reply yet, asking again")
-                    sendCli(gen, command, triesLeft - 1, timeoutMs, onReply)
+                    sendCli(gen, command, triesLeft - 1, timeoutMs, onGiveUp, onReply)
+                } else if (onGiveUp != null) {
+                    onGiveUp()
                 } else {
                     failConfig("no reply from the sensor — it may be out of range")
                 }
