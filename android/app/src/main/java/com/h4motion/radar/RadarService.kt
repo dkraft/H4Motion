@@ -103,6 +103,7 @@ class RadarService : Service(), MeshCompanion.Listener {
 
     private fun startLink() {
         setDemo(false)
+        RadarHub.update { it.copy(companionCurrent = null) }
         startAsForeground("looking for companion")
         companion.scan()
     }
@@ -118,7 +119,14 @@ class RadarService : Service(), MeshCompanion.Listener {
             demoNear = false
             linkStatus = "demo"
             RadarHub.update {
-                it.copy(demo = true, status = "demo on #sensemb", blips = emptyList(), alert = null, linkWifi = false)
+                it.copy(
+                    demo = true,
+                    status = "demo on #sensemb",
+                    blips = emptyList(),
+                    alert = null,
+                    linkWifi = false,
+                    companionCurrent = null
+                )
             }
             startAsForeground("demo track")
             main.post(demoTick)
@@ -147,6 +155,10 @@ class RadarService : Service(), MeshCompanion.Listener {
             }
             main.postDelayed(this, 700)
         }
+    }
+
+    override fun onCompanionVersion(version: String) {
+        RadarHub.update { it.copy(companionCurrent = ExpectedCompanion.current(version)) }
     }
 
     override fun onLinkMode(wifi: Boolean, ip: String) {

@@ -42,6 +42,7 @@ class MeshCompanion(
         fun onStatus(text: String)
         fun onChannelText(text: String)
         fun onLinkMode(wifi: Boolean, ip: String) {}
+        fun onCompanionVersion(version: String) {}
     }
 
     private val appContext = context.applicationContext
@@ -597,6 +598,12 @@ class MeshCompanion(
 
     private fun startQuery() {
         send(byteArrayOf(DEVICE_QUERY.toByte(), 3), setOf(DEVICE_INFO, ERR)) { frame ->
+            val version = if (frame.size >= 80 && (frame[0].toInt() and 0xFF) == DEVICE_INFO) {
+                cString(frame, 60, 20).trim()
+            } else {
+                ""
+            }
+            listener.onCompanionVersion(version)
             if (frame.size >= 4 && (frame[0].toInt() and 0xFF) == DEVICE_INFO) {
                 val fw = frame[1].toInt() and 0xFF
                 if (fw >= 3) maxChannels = (frame[3].toInt() and 0xFF).coerceIn(1, 8)

@@ -326,10 +326,10 @@ class InstrumentDeck @JvmOverloads constructor(
             (SystemClock.elapsedRealtime() - sampleElapsedMs).coerceAtLeast(0L)
         }
         val text = when {
-            age < 0L -> "LAT --"
-            age >= 10000L -> "LAT 10s+"
-            age >= 1000L -> String.format(Locale.US, "LAT %.1fs", age / 1000.0)
-            else -> String.format(Locale.US, "LAT %d ms", age)
+            age < 0L -> "LAST --"
+            age >= 10000L -> "LAST 10s+"
+            age >= 1000L -> String.format(Locale.US, "LAST %.1fs", age / 1000.0)
+            else -> String.format(Locale.US, "LAST %d ms", age)
         }
         val paint = if (age >= 1000L) valuePaint else dimPaint
         if (age >= 1000L) valuePaint.color = nearColor

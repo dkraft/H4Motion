@@ -76,4 +76,14 @@
             android:layout_weight="1"
             android:text="8 m" />
     </LinearLayout>
+
+    <TextView
+        android:id="@+id/appVersion"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:fontFamily="monospace"
+        android:gravity="end"
+        android:paddingTop="4dp"
+        android:textColor="#6E9A7C"
+        android:textSize="12sp" />
 </LinearLayout>

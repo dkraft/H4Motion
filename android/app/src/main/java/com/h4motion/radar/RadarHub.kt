@@ -22,7 +22,9 @@ object RadarHub {
         val firstEnter: EnterMark? = null,
         val lastEnter: EnterMark? = null,
         /** elapsedRealtime when the picture now on screen was applied. */
-        val sampleElapsedMs: Long = 0L
+        val sampleElapsedMs: Long = 0L,
+        /** null until the companion answers. True when its firmware is current. */
+        val companionCurrent: Boolean? = null
     )
 
     @Volatile

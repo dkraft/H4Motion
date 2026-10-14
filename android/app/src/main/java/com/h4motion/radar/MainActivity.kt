@@ -36,6 +36,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var deck: InstrumentDeck
     private lateinit var radar: RadarView
     private lateinit var rangeButton: Button
+    private lateinit var versionView: TextView
+    private var companionCurrent: Boolean? = null
 
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
@@ -86,6 +88,8 @@ class MainActivity : AppCompatActivity() {
         deck = findViewById(R.id.deck)
         radar = findViewById(R.id.radar)
         rangeButton = findViewById(R.id.btnRange)
+        versionView = findViewById(R.id.appVersion)
+        versionView.text = appVersionName()
         applyContrast(highContrast())
 
         findViewById<Button>(R.id.btnScan).setOnClickListener { requestAction(scan = true) }
@@ -246,6 +250,28 @@ class MainActivity : AppCompatActivity() {
         }
         radar.setHighContrast(high)
         deck.setHighContrast(high)
+        paintVersion()
+    }
+
+    /** App version. Green when the companion firmware is current, red when it is older. */
+    private fun paintVersion() {
+        versionView.setTextColor(
+            when (companionCurrent) {
+                true -> Color.parseColor("#3DFF7A")
+                false -> Color.parseColor("#FF2A2A")
+                null -> if (highContrast()) Color.WHITE else Color.parseColor("#6E9A7C")
+            }
+        )
+    }
+
+    private fun appVersionName(): String {
+        val info = if (Build.VERSION.SDK_INT >= 33) {
+            packageManager.getPackageInfo(packageName, PackageManager.PackageInfoFlags.of(0))
+        } else {
+            @Suppress("DEPRECATION")
+            packageManager.getPackageInfo(packageName, 0)
+        }
+        return info.versionName ?: ""
     }
 
     private fun paintConfig(view: View, high: Boolean) {
@@ -298,6 +324,10 @@ class MainActivity : AppCompatActivity() {
             state.rangeM,
             state.sampleElapsedMs
         )
+        if (companionCurrent != state.companionCurrent) {
+            companionCurrent = state.companionCurrent
+            paintVersion()
+        }
     }
 
     private fun permissionsReady(): Boolean {
